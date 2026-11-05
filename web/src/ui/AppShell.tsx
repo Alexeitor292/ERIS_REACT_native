@@ -24,7 +24,7 @@ import HeaderSearch from "./HeaderSearch";
 import ProfileMenu from "./ProfileMenu";
 import { navigateWithTransition, pageRendered } from "./pageTransition";
 import { currentPageLabel, documentTitle } from "./shellModel";
-import { hasWorkQueue, isAdmin, isOperationalUser, isPublicOnly, roleLabel } from "../utils/roleModel";
+import { hasMaintenanceDuties, hasWorkQueue, isAdmin, isOperationalUser, isPublicOnly, roleLabel } from "../utils/roleModel";
 import { placeLabel } from "../utils/orgDistricts";
 import type { UserOrg } from "../api/types";
 
@@ -104,7 +104,7 @@ function useNavSections(): NavSection[] {
   const roles = me?.roles;
   const operational = isOperationalUser(roles);
   const admin = isAdmin(roles);
-  const maintenance = !!me?.maintenance_districts?.length;
+  const maintenance = hasMaintenanceDuties(me);
   const viewerOnly = isPublicOnly(roles) && !maintenance;
 
   if (viewerOnly) {
@@ -120,10 +120,8 @@ function useNavSections(): NavSection[] {
   }
 
   const sections: NavSection[] = [];
-  if (maintenance || admin) {
-    sections.push({ label: "Maintenance", items: [{ to: "/maintenance-work", label: "Maintenance Work", icon: Inbox }] });
-  }
-  if (hasWorkQueue(roles)) {
+  // One queue for everyone: maintenance reports wait in My Work with the rest.
+  if (hasWorkQueue(roles, maintenance)) {
     sections.push({ label: "Workspace", items: [{ to: "/my-work", label: "My Work", icon: Inbox }] });
   }
 
@@ -234,7 +232,7 @@ function MobileNavigation({ pages }: { pages: NavEntry[] }) {
 }
 
 export default function AppShell({ title, children, workspace = false }: { title: string; children: ReactNode; workspace?: boolean }) {
-  const { me, logout } = useAuth();
+  const { me, logout, actFor } = useAuth();
   const { navCollapsed, setNavCollapsed } = useUiSettings();
   const navExpanded = !navCollapsed;
   const setNavExpanded = (update: (expanded: boolean) => boolean) => setNavCollapsed(!update(navExpanded));
@@ -269,12 +267,19 @@ export default function AppShell({ title, children, workspace = false }: { title
             <HeaderSearch pages={pages} searchRecords={!!me && isOperationalUser(me.roles)} />
           </div>
           <div className="flex items-center justify-end gap-1.5">
-            {me && (!isPublicOnly(me.roles) || !!me.maintenance_districts?.length) ? <NotificationBell /> : null}
+            {me && (!isPublicOnly(me.roles) || hasMaintenanceDuties(me)) ? <NotificationBell /> : null}
             <span aria-hidden className="mx-1 hidden h-6 w-px bg-[var(--line)] sm:block" />
             <ProfileMenu orgLine={orgLine} />
           </div>
         </div>
       </header>
+
+      {me?.acting ? (
+        <div role="status" className="flex flex-wrap items-center justify-center gap-3 bg-[var(--brand)] px-4 py-1.5 text-sm font-semibold text-white">
+          <span>You are acting for {me.full_name || me.email}. What you do is recorded under both names.</span>
+          <button type="button" onClick={() => actFor(null)} className="rounded-md border border-white/60 px-2 py-0.5 text-xs font-semibold hover:bg-white/10">Back to my own work</button>
+        </div>
+      ) : null}
 
       <div className={cn("mx-auto flex w-full max-w-[1900px] flex-1 flex-col px-4 md:px-6 lg:flex-row", workspace ? "gap-3 py-3 lg:min-h-0 lg:gap-4" : "gap-4 py-6 lg:gap-6")}>
         <MobileNavigation pages={pages} />

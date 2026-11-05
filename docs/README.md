@@ -17,7 +17,7 @@ original author. **If something you needed is missing, add it here**: see
 | **A developer or intern** | [Handover guide: first week](handover/README.md#first-week-for-a-new-developer) → [Getting started](development/getting-started.md) → [Development guide](development/README.md) → [Architecture](architecture/README.md) |
 | **Running the servers** (Caltrans IT, operators) | [Operations: dev, test and prod](operations/README.md) → [Caltrans Podman runbook](operations/caltrans-podman.md) → [Monitoring and troubleshooting](operations/monitoring-and-troubleshooting.md) |
 | **Reviewing security** | [Security architecture](security/README.md) → [Authentication and sessions](security/authentication-and-sessions.md) → [Supply chain](security/supply-chain.md) |
-| **Using ERIS** (field staff, coordinators, GeoTech, administrators) | [User guides](user-guides/README.md) |
+| **Using ERIS** (Maintenance, GeoTech, administrators) | [User guides](user-guides/README.md) |
 | **Fixing something broken** | [Troubleshooting FAQ](handover/troubleshooting.md) → [Security incident response](security/incident-response.md) |
 
 ## Map of the documentation

@@ -10,6 +10,8 @@ pymysql
 python-dotenv
 minio
 pydantic-settings
+# Time zone data for zoneinfo: the slim image may have none (app/timezones.py).
+tzdata
 # JWTs: Entra token verification, the sign-in state cookie, APNs provider tokens.
 # PyJWT, not python-jose: jose accepted public keys as HMAC secrets
 # (PYSEC-2026-4298) and pulled in python-ecdsa (Minerva timing attack).
@@ -19,8 +21,6 @@ cryptography>=42
 argon2-cffi
 python-multipart
 email-validator
-reportlab
-pypdf
 openpyxl>=3.1
 Pillow>=13,<14
 alembic>=1.13,<2.0

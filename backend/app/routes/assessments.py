@@ -29,7 +29,8 @@ import json
 import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, Query
-from sqlalchemy import text
+from pydantic import BaseModel, Field
+from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
 from ..services import maintenance_workflows as mw
@@ -41,7 +42,6 @@ from ..roles import (
     BRANCH_CHIEF,
     OFFICE_CHIEF,
     GISA_AUTHOR_ROLES,
-    MAINTENANCE_COORDINATOR,
     OPERATIONAL_ROLES,
     has_role,
     is_admin,
@@ -60,8 +60,11 @@ from ..schemas.common import (
     AssessmentSubmitRequest,
     IncidentTriageRequest,
 )
+from ..services import delegations
+from ..services import district_contact
 from ..services import notifications as notifications_svc
 from ..services import org_directory
+from ..services import org_tree
 from ..services import public_visibility
 from ..services import workflow_tree as workflow_tree_svc
 from ..user_metadata import normalize_office_code
@@ -71,9 +74,15 @@ from . import incidents as incidents_routes
 router = APIRouter(tags=["assessments"])
 
 # Guard role lists (canonical + legacy aliases).
-TRIAGE_ROLES = [MAINTENANCE_COORDINATOR] + [ADMIN]
+TRIAGE_ROLES = [ADMIN]
 OFFICE_CHIEF_ROLES = [OFFICE_CHIEF] + [ADMIN]
 BRANCH_CHIEF_ROLES = [BRANCH_CHIEF] + [ADMIN]
+WORKLOAD_ROLES = [OFFICE_CHIEF, BRANCH_CHIEF, ADMIN]
+WORK_BRANCH_CHIEF = "BRANCH_CHIEF"
+WORK_STAFF = "STAFF"
+WORK_SENIOR_SPECIALIST = "SENIOR_SPECIALIST"
+# Reassigning a Senior Specialist is legal from here (assign_senior_engineer).
+SENIOR_MOVABLE_STATES = {"DRAFT", "REVISION_REQUESTED"}
 # Authoring the assessment (fill / submit / add a supplemental) is open to the
 # Senior Specialist as well as to Staff — on the Senior Specialist route the senior
 # engineer IS the assignee (design §2.1, §5.2). The identity check inside each
@@ -336,6 +345,10 @@ def _record_event(
     metadata: dict | None = None,
 ) -> None:
     """Append an immutable row to the assessment/triage timeline."""
+    metadata = delegations.stamp(db, metadata)
+    district_contact.tell_about_event(
+        db, incident_id=incident_id, assessment_id=assessment_id, event_type=event_type, actor_id=actor_user_id,
+    )
     db.execute(
         text(
             """
@@ -400,6 +413,18 @@ def _active_assignments(db: Session, assessment_id: int) -> list[dict]:
     ]
 
 
+def _actor_label(actor_name: str | None, metadata_json: object) -> str | None:
+    """The name on a timeline row, naming both people when someone acted for another."""
+    try:
+        metadata = json.loads(metadata_json) if isinstance(metadata_json, (str, bytes)) else metadata_json
+        acted_by = (metadata or {}).get("acted_by") or {}
+    except (TypeError, ValueError, AttributeError):
+        acted_by = {}
+    if not acted_by.get("full_name"):
+        return actor_name
+    return f"{acted_by['full_name']}, acting for {actor_name or 'someone away'}"
+
+
 def _assessment_events(db: Session, assessment_id: int, incident_id: int) -> list[dict]:
     rows = db.execute(
         text(
@@ -407,7 +432,7 @@ def _assessment_events(db: Session, assessment_id: int, incident_id: int) -> lis
             SELECT e.id, e.assessment_id, e.incident_id, e.actor_user_id, e.event_type,
                    e.disposition, e.from_state, e.to_state, e.notes,
                    e.target_incident_id, e.target_location_id, e.created_at,
-                   u.full_name AS actor_name, u.email AS actor_email
+                   e.metadata_json, u.full_name AS actor_name, u.email AS actor_email
             FROM assessment_events e
             LEFT JOIN users u ON u.id = e.actor_user_id
             WHERE e.assessment_id = :aid OR e.incident_id = :iid
@@ -422,7 +447,7 @@ def _assessment_events(db: Session, assessment_id: int, incident_id: int) -> lis
             "assessment_id": int(r["assessment_id"]) if r["assessment_id"] is not None else None,
             "incident_id": int(r["incident_id"]),
             "actor_user_id": int(r["actor_user_id"]),
-            "actor_name": r["actor_name"],
+            "actor_name": _actor_label(r["actor_name"], r["metadata_json"]),
             "actor_email": r["actor_email"],
             "event_type": r["event_type"],
             "disposition": r["disposition"],
@@ -678,6 +703,7 @@ def _triage_assessment_required(
     incident_id = int(incident["id"])
     actor_id = int(user["id"])
     district = incident.get("district")
+    district_contact.assign(db, incident, payload.district_contact_user_id, actor_id=actor_id)
 
     # Resolve destination office: configurable routing, with optional audited
     # override (coordinator/admin only, which the guard already enforces).
@@ -993,6 +1019,167 @@ def _triage_duplicate(
 # ---------------------------------------------------------------------------
 # Read: list + detail (broad operational visibility)
 # ---------------------------------------------------------------------------
+
+
+class AssessmentMoveRequest(BaseModel):
+    assessment_ids: list[int] = Field(..., min_length=1, max_length=200)
+    to_user_id: int = Field(..., ge=1)
+    kind: str = Field(..., max_length=24)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+def _holder_left(kind: str, item: dict, place: dict, active: bool) -> bool:
+    """Whether the person holding this work has left the place that gave it to them."""
+    if not active or place.get("position") is None:
+        return True
+    office = normalize_office_code(item.get("office_code"))
+    if office and normalize_office_code(place.get("office_code")) != office:
+        return True
+    if kind == WORK_BRANCH_CHIEF:
+        routed = item.get("routed_branch_id")
+        return place["position"] != "BRANCH_CHIEF" or (routed is not None and place.get("branch_id") != int(routed))
+    if kind == WORK_SENIOR_SPECIALIST:
+        return place["position"] != "SENIOR_SPECIALIST"
+    routed = item.get("routed_branch_id")
+    return place["position"] != "STAFF" or (routed is not None and place.get("branch_id") != int(routed))
+
+
+def group_work(rows: list[dict], *, office_view: bool, branch_view_of: int | None, people: dict[int, dict]) -> list[dict]:
+    """Open assessments by who holds them, the ones left behind first.
+
+    ``office_view``: the branch chiefs and Senior Specialists an office chief moves
+    work between. ``branch_view_of``: the Staff on what this branch chief was handed.
+    """
+    groups: dict[tuple[str, int | None], dict] = {}
+
+    def add(kind: str, holder: int | None, row: dict) -> None:
+        person = people.get(int(holder)) if holder is not None else None
+        group = groups.setdefault((kind, holder), {
+            "kind": kind,
+            "holder": {"id": holder, "full_name": person["full_name"] if person else None,
+                       "placement": person["place"].get("label") if person else None},
+            "left": False,
+            "items": [],
+        })
+        group["left"] = group["left"] or holder is None or person is None or _holder_left(kind, row, person["place"], person["active"])
+        group["items"].append({
+            "id": int(row["id"]),
+            "incident_id": int(row["incident_id"]),
+            "state": row["state"],
+            "title": row.get("title"),
+            "office_code": row.get("office_code"),
+            "branch_label": row.get("routed_branch_name") or (f"Branch {row['routed_branch_letter']}" if row.get("routed_branch_letter") else None),
+            "updated_at": row["updated_at"].isoformat() if row.get("updated_at") else None,
+        })
+
+    for row in rows:
+        chief = row.get("branch_chief_user_id")
+        assignee = row.get("assigned_engineer_user_id")
+        route = row.get("routing_path")
+        if office_view and route == ROUTE_BRANCH:
+            add(WORK_BRANCH_CHIEF, int(chief) if chief is not None else None, row)
+        if office_view and route == ROUTE_SENIOR_ENGINEER and assignee is not None and row["state"] in SENIOR_MOVABLE_STATES:
+            add(WORK_SENIOR_SPECIALIST, int(assignee), row)
+        if branch_view_of is not None and route == ROUTE_BRANCH and assignee is not None and chief is not None and int(chief) == branch_view_of:
+            add(WORK_STAFF, int(assignee), row)
+    return sorted(groups.values(), key=lambda g: (not g["left"], g["kind"], str(g["holder"]["full_name"] or "")))
+
+
+@router.get("/assessments/workload")
+def assessment_workload(db: Session = Depends(get_db), user=Depends(require_roles(WORKLOAD_ROLES))):
+    """Open work by who holds it, for a chief moving it around.
+
+    An office chief sees only what needs them: work left by a branch chief or Senior
+    Specialist who has moved on, to spread around or give to whoever took over. A
+    branch chief sees the Staff on what was handed to them, to spread it around
+    whenever they like; an administrator, all of it. An office chief needs none of
+    this for their own successor, since office review goes by office.
+    """
+    admin = is_admin(user)
+    params: dict = {}
+    scope = ["a.state NOT IN ('APPROVED', 'FINALIZED')"]
+    office_view = admin or has_role(user, OFFICE_CHIEF)
+    branch_view_of = int(user["id"]) if has_role(user, BRANCH_CHIEF) else None
+    if not admin:
+        clauses = []
+        if office_view:
+            params["office"] = org_directory.user_office_code(db, user)
+            clauses.append("a.office_code = :office")
+        if branch_view_of is not None:
+            params["me"] = branch_view_of
+            clauses.append("a.branch_chief_user_id = :me")
+        scope.append(f"({' OR '.join(clauses)})")
+    rows = [dict(r) for r in db.execute(
+        text(f"""
+            SELECT a.id, a.incident_id, a.state, a.routing_path, a.office_code, a.branch_chief_user_id,
+                   a.assigned_engineer_user_id, a.routed_branch_id, a.routed_branch_name, a.routed_branch_letter,
+                   a.updated_at, i.title
+              FROM assessments a LEFT JOIN incidents i ON i.id = a.incident_id
+             WHERE {' AND '.join(scope)}
+             ORDER BY a.updated_at DESC, a.id DESC
+             LIMIT 1000
+        """),
+        params,
+    ).mappings()]
+    holders = {int(r[key]) for r in rows for key in ("branch_chief_user_id", "assigned_engineer_user_id") if r[key] is not None}
+    people = {
+        int(row["id"]): {
+            "full_name": row["name"], "active": bool(row["is_active"]),
+            "place": org_tree.placement(db, int(row["id"])),
+        }
+        for row in (db.execute(
+            text("SELECT id, COALESCE(full_name, email) AS name, is_active FROM users WHERE id IN :ids").bindparams(
+                bindparam("ids", expanding=True)),
+            {"ids": sorted(holders)},
+        ).mappings() if holders else [])
+    }
+    if admin:
+        groups = group_work(rows, office_view=True, branch_view_of=None, people=people) + group_staff_for_admin(rows, people)
+    else:
+        groups = group_work(rows, office_view=office_view, branch_view_of=None, people=people)
+        groups = [group for group in groups if group["left"]]
+        if branch_view_of is not None:
+            groups += group_work(rows, office_view=False, branch_view_of=branch_view_of, people=people)
+    return {"groups": groups, "left": sum(len(g["items"]) for g in groups if g["left"])}
+
+
+def group_staff_for_admin(rows: list[dict], people: dict[int, dict]) -> list[dict]:
+    """An administrator passes every gate, so also sees the Staff on every branch's work."""
+    found: list[dict] = []
+    for chief in {int(r["branch_chief_user_id"]) for r in rows if r.get("branch_chief_user_id") is not None}:
+        found += group_work(rows, office_view=False, branch_view_of=chief, people=people)
+    return sorted(found, key=lambda g: (not g["left"], str(g["holder"]["full_name"] or "")))
+
+
+@router.post("/assessments/move")
+def move_assessments(payload: AssessmentMoveRequest, db: Session = Depends(get_db), user=Depends(require_roles(WORKLOAD_ROLES))):
+    """Move several assessments to one person: spreading work is several of these.
+
+    Each is an ordinary hand-off or reassignment, with its own checks, timeline row
+    and notice, so the same rules hold and the form and its work stay where they
+    are. Each stands alone: one refused does not undo the others, and the answer
+    says which and why.
+    """
+    moved: list[int] = []
+    failed: list[dict] = []
+    for assessment_id in dict.fromkeys(payload.assessment_ids):
+        try:
+            if payload.kind == WORK_BRANCH_CHIEF:
+                delegate_branch(AssessmentDelegateBranchRequest(branch_chief_user_id=payload.to_user_id, notes=payload.notes),
+                                assessment_id=assessment_id, db=db, user=user)
+            elif payload.kind == WORK_STAFF:
+                assign_engineer(AssessmentAssignEngineerRequest(engineer_user_id=payload.to_user_id, notes=payload.notes),
+                                assessment_id=assessment_id, db=db, user=user)
+            elif payload.kind == WORK_SENIOR_SPECIALIST:
+                assign_senior_engineer(AssessmentAssignSeniorEngineerRequest(senior_engineer_user_id=payload.to_user_id, notes=payload.notes),
+                                       assessment_id=assessment_id, db=db, user=user)
+            else:
+                raise HTTPException(status_code=400, detail="kind must be BRANCH_CHIEF, STAFF or SENIOR_SPECIALIST")
+            moved.append(assessment_id)
+        except HTTPException as refused:
+            db.rollback()
+            failed.append({"id": assessment_id, "detail": str(refused.detail)})
+    return {"moved": moved, "failed": failed}
 
 
 @router.get("/assessments")
@@ -1434,8 +1621,6 @@ def _perform_engineer_assignment(
     notes: str | None,
     assignment_role: str = ROLE_ENGINEER,
     event_type: str = "ENGINEER_ASSIGNED",
-    out_of_branch: bool = False,
-    target_branch_id: int | None = None,
 ) -> int | None:
     """Assign (or reassign) the assessment's author.
 
@@ -1531,12 +1716,6 @@ def _perform_engineer_assignment(
         }
     else:
         event_metadata = {"engineer_user_id": engineer_user_id, "submission_id": linked_submission_id}
-        if out_of_branch:
-            # The record of a deliberate cross-branch assignment. `notes` is the
-            # reason the endpoint required; this flag is what makes it findable
-            # later without re-deriving anybody's branch from today's org data.
-            event_metadata["out_of_branch"] = True
-            event_metadata["assigned_branch_id"] = target_branch_id
     _record_event(
         db,
         incident_id=incident_id,
@@ -1585,54 +1764,26 @@ def assign_engineer(
     office_code = assessment.get("office_code")
     incidents_routes._ensure_incident_office_access(user, office_code, db=db)
 
-    # The target check this endpoint never had. delegate_branch and
-    # assign_senior_engineer both validate that the person they name belongs to
-    # the assessment's office; assign_engineer validated state, route and the
-    # caller's identity, and then accepted ANY user id the database trigger would
-    # tolerate — including a Staff member in another office (design §5, §14.6).
-    #
-    # OFFICE: a hard refusal, matching its two siblings. A Staff member with NO
-    # recorded office is still allowed, because the Staff picker's permissive
-    # blank-office fallback survives one release (design §5) and refusing here
-    # would empty the picker in any deployment whose accounts predate the org
-    # model.
-    #
-    # BRANCH: allowed, with a reason. A chief covering a short-staffed branch is
-    # a real thing and the org model must not be the first place ERIS says no to
-    # it — but the choice is recorded on the ENGINEER_ASSIGNED event so it is
-    # visible afterwards. ``notes`` carries the reason; there is no new request
-    # field, so no client has to change to keep working.
+    # Only Staff of the branch this assessment was handed to (owner, 2026-11-03): the
+    # picker offers nobody else, and this keeps the rule true for any other client.
+    # For someone from elsewhere, the office chief hands the assessment to their
+    # branch chief, or moves the person into this branch.
     notes = (payload.notes or "").strip() or None
     target_org = org_directory.resolve_user_org(db, int(payload.engineer_user_id))
     target_office = normalize_office_code(target_org.get("office_code"))
     assessment_office = normalize_office_code(office_code)
-    if target_office and assessment_office and target_office != assessment_office:
-        raise HTTPException(
-            status_code=400,
-            detail="Selected Staff member belongs to another GeoTech office",
-        )
+    if assessment_office and target_office != assessment_office:
+        raise HTTPException(status_code=400, detail="Selected Staff member belongs to another GeoTech office")
     assessment_branch_id = (
         int(assessment["routed_branch_id"]) if assessment.get("routed_branch_id") is not None else None
     )
     if assessment_branch_id is None:
         # No branch was frozen at hand-off (an assessment routed before the org
-        # model, or a chief whose branch nobody has recorded): fall back to the
-        # caller's own branch, which is the branch they are assigning out of.
+        # model): the caller's own branch is the one they are assigning out of.
         assessment_branch_id = org_directory.resolve_user_org(db, user).get("branch_id")
     target_branch_id = target_org.get("branch_id")
-    out_of_branch = bool(
-        assessment_branch_id is not None
-        and target_branch_id is not None
-        and int(assessment_branch_id) != int(target_branch_id)
-    )
-    if out_of_branch and not notes:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "This Staff member is in another branch. Record why in notes to "
-                "assign them anyway."
-            ),
-        )
+    if assessment_branch_id is not None and (target_branch_id is None or int(target_branch_id) != int(assessment_branch_id)):
+        raise HTTPException(status_code=400, detail="Only Staff of this branch can be assigned this assessment.")
 
     try:
         _perform_engineer_assignment(
@@ -1641,8 +1792,6 @@ def assign_engineer(
             engineer_user_id=int(payload.engineer_user_id),
             actor_user_id=int(user["id"]),
             notes=notes,
-            out_of_branch=out_of_branch,
-            target_branch_id=target_branch_id,
         )
         incidents_routes._queue_incident_notifications(
             db=db,
@@ -2364,6 +2513,7 @@ def review_assessment(
     allowed, reason = _review_authority(db, assessment, user)
     if not allowed:
         raise HTTPException(status_code=403, detail=reason)
+    delegations.refuse_own_work(db, assessment.get("assigned_engineer_user_id"))
     if assessment["state"] != "SUBMITTED":
         raise HTTPException(status_code=409, detail=f"Cannot review from state {assessment['state']}")
 

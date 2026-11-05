@@ -6,7 +6,6 @@ export type Person = {
   email?: string;
   is_active?: boolean;
   placement?: { label?: string | null };
-  maintenance?: { coordinator?: string[]; crew?: string[] };
 };
 export type Duty = { id: string; name: string; user_ids: number[]; report: boolean; view_district: boolean; edit_report: boolean };
 export type Step = { name: string; kind: "REVIEW" | "DECISION"; duty_ids: string[]; notify_duty_ids: string[]; rule: "ANY" | "ALL"; request_information: boolean; allow_maintenance: boolean; allow_geotech: boolean };
@@ -26,4 +25,4 @@ export const workflowPeople = (district: string, q: string) => api<{ items: Pers
 export const publishWorkflow = (district: string, revision: number, definition: Definition) => api<DistrictWorkflow>(`/maintenance-workflows/${district}`, { method: "PUT", body: JSON.stringify({ revision, definition }) });
 export const maintenanceWork = () => api<{ items: WorkItem[] }>("/maintenance-work/incidents");
 export const maintenanceDetail = (id: number) => api<WorkflowDetail>(`/maintenance-work/incidents/${id}`);
-export const maintenanceAction = (id: number, body: { version: number; action: string; notes: string; description?: string; event_group_id?: number | null; new_group_title?: string | null }) => api<WorkflowDetail>(`/maintenance-work/incidents/${id}/actions`, { method: "POST", body: JSON.stringify(body) });
+export const maintenanceAction = (id: number, body: { version: number; action: string; notes: string; description?: string; event_group_id?: number | null; new_group_title?: string | null; district_contact_user_id?: number | null }) => api<WorkflowDetail>(`/maintenance-work/incidents/${id}/actions`, { method: "POST", body: JSON.stringify(body) });

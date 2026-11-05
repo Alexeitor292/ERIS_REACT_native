@@ -7,6 +7,13 @@ import {
   UNROUTED_PIPELINE,
   assessmentBranchName,
   assessmentEventLabel,
+  assessmentPlace,
+  eventTitle,
+  nextStepLine,
+  reviewerName,
+  shortOfficeName,
+  waitingWho,
+  withoutTrailingDate,
   assessmentOfficeName,
   assessmentOrgLine,
   officeLabel,
@@ -147,7 +154,7 @@ test("state labels are route-aware and never print a raw code", () => {
   assert.equal(assessmentStateLabelFor("SUBMITTED", null), "Submitted for review");
   assert.equal(assessmentStateLabelFor("APPROVED", "BRANCH"), "Approved — complete");
   assert.equal(assessmentStateLabelFor("FINALIZED", "BRANCH"), "Signed off (legacy)");
-  assert.equal(assessmentStateLabelFor("PENDING_OFFICE_DELEGATION", null), "Awaiting routing");
+  assert.equal(assessmentStateLabelFor("PENDING_OFFICE_DELEGATION", null), "Needs routing");
   // The state code keeps its deployed name; the label does not repeat it.
   assert.equal(assessmentStateLabelFor("PENDING_ENGINEER_ASSIGNMENT", "BRANCH"), "Awaiting Staff assignment");
   for (const state of ALL_STATES) {
@@ -193,7 +200,7 @@ test("assignment-role and event labels rename the role, not the code", () => {
   assert.equal(assignmentRoleLabel("SOMETHING_NEW"), "Something New");
   assert.equal(assessmentEventLabel("ENGINEER_ASSIGNED"), "Staff assigned");
   assert.equal(assessmentEventLabel("SENIOR_ENGINEER_ASSIGNED"), "Senior Specialist assigned");
-  assert.equal(assessmentEventLabel("OFFICE_DELEGATED"), "Office Delegated");
+  assert.equal(assessmentEventLabel("OFFICE_DELEGATED"), "Handed to a branch chief");
 });
 
 test("waiting-on names the route's reviewer and the assignee, and is null only when complete", () => {
@@ -376,7 +383,7 @@ test("a step is yours only when it names you; a power over it is stepping in", (
 test("the record's button names the action it leads to", () => {
   const seDraft = { ...seniorEngineerAssessment, state: "DRAFT" as const };
   const author = assessmentPermissions({ ...noRoles, seniorEngineer: true }, 5, "NORTH", seDraft);
-  assert.equal(workActionLabel("DRAFT", author, true), "Send it for review");
+  assert.equal(workActionLabel("DRAFT", author, true), "Send for review");
   assert.equal(workActionLabel("DRAFT", author, false), "Start the technical submission");
   const chief = assessmentPermissions({ ...noRoles, officeChief: true }, 3, "NORTH", seDraft);
   assert.equal(workActionLabel("DRAFT", chief, true), "Change who has it");
@@ -384,4 +391,61 @@ test("the record's button names the action it leads to", () => {
   assert.equal(workActionLabel("PENDING_OFFICE_DELEGATION", unrouted, false), "Route it");
   const reviewer = assessmentPermissions({ ...noRoles, branchChief: true }, 8, "NORTH", baseAssessment);
   assert.equal(workActionLabel("SUBMITTED", reviewer, true), "Review it");
+});
+
+test("a list names the office and place in a few words", () => {
+  assert.equal(shortOfficeName("Office of Geotechnical Design South"), "South");
+  assert.equal(shortOfficeName("Geotechnical Support"), "Geotechnical Support");
+  assert.equal(
+    assessmentPlace({
+      office_code: "SOUTH", routed_office_name: "Office of Geotechnical Design South",
+      routed_branch_name: "Branch A", routed_branch_letter: "A", district: "7",
+    }),
+    "South · Branch A · D07",
+  );
+  assert.equal(
+    assessmentPlace({ office_code: "NORTH", routed_office_name: "Office of Geotechnical Design North", routed_branch_name: null, routed_branch_letter: null, district: null }),
+    "North",
+  );
+});
+
+test("who a step waits on is named when known", () => {
+  const person = { routing_path: "BRANCH" as const, assigned_user_name: "Alicia", branch_chief_name: "Carmen" };
+  assert.equal(waitingWho({ ...person, routing_path: null, state: "PENDING_OFFICE_DELEGATION" }), "Office chief");
+  assert.equal(waitingWho({ ...person, state: "PENDING_ENGINEER_ASSIGNMENT" }), "Carmen");
+  assert.equal(waitingWho({ ...person, state: "DRAFT" }), "Alicia");
+  assert.equal(waitingWho({ ...person, state: "REVISION_REQUESTED" }), "Alicia");
+  assert.equal(waitingWho({ ...person, state: "SUBMITTED" }), "Carmen");
+  assert.equal(waitingWho({ ...person, state: "APPROVED" }), null);
+  assert.equal(waitingWho({ state: "DRAFT", routing_path: "BRANCH" }), "Assigned Staff");
+  assert.equal(waitingWho({ state: "DRAFT", routing_path: "SENIOR_ENGINEER" }), "Assigned Senior Specialist");
+  assert.equal(waitingWho({ state: "SUBMITTED", routing_path: "SENIOR_ENGINEER" }), "Office chief");
+});
+
+test("the route decides the reviewer", () => {
+  assert.equal(reviewerName({ routing_path: "BRANCH", branch_chief_name: "Carmen" }), "Carmen");
+  assert.equal(reviewerName({ routing_path: "BRANCH" }), "Branch chief");
+  assert.equal(reviewerName({ routing_path: "SENIOR_ENGINEER", branch_chief_name: null }), "Office chief");
+  assert.equal(reviewerName({ routing_path: null }), null);
+});
+
+test("the next step is one short line", () => {
+  const person = { routing_path: "BRANCH" as const, assigned_user_name: "Alicia", branch_chief_name: "Carmen" };
+  assert.equal(nextStepLine({ ...person, routing_path: null, state: "PENDING_OFFICE_DELEGATION" }, null), "Office chief routes this assessment");
+  assert.equal(nextStepLine({ ...person, state: "PENDING_ENGINEER_ASSIGNMENT" }, null), "Carmen assigns Staff");
+  assert.equal(nextStepLine({ ...person, state: "DRAFT" }, 7), "Alicia completes form #7");
+  assert.equal(nextStepLine({ ...person, state: "DRAFT" }, null), "Alicia starts the form");
+  assert.equal(nextStepLine({ ...person, state: "REVISION_REQUESTED" }, 7), "Alicia makes the requested changes");
+  assert.equal(nextStepLine({ ...person, state: "SUBMITTED" }, 7), "Carmen reviews this assessment");
+  assert.equal(nextStepLine({ ...person, state: "APPROVED" }, 7), null);
+});
+
+test("a history row says what happened in plain words", () => {
+  assert.equal(eventTitle({ event_type: "TRIAGE_DECISION", disposition: "ASSESSMENT_REQUIRED" }), "Assessment Required");
+  assert.equal(eventTitle({ event_type: "ENGINEER_ASSIGNED", disposition: null }), "Staff assigned");
+});
+
+test("a headline leaves off the date an incident's title ends with", () => {
+  assert.equal(withoutTrailingDate("07-LA-002-38.000 - 09/22/26"), "07-LA-002-38.000");
+  assert.equal(withoutTrailingDate("Rockfall on SR-1"), "Rockfall on SR-1");
 });

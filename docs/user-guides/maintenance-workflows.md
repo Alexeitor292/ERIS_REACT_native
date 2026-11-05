@@ -4,15 +4,19 @@ Maintenance duties are independent of personnel classifications or job titles.
 An administrator creates a district's first workflow under **Organization →
 Maintenance**, names its workflow managers, and assigns people to duties.
 Named district managers and administrators can publish subsequent changes.
-Existing coordinator and crew lists remain available for districts that have
-not adopted a configurable workflow.
+
+There is one **Maintenance** role. On its own it reads a person's own reports; what
+more they can do comes from their part here, and being named in a workflow is what
+gives them the role. A district with no workflow has no Maintenance reporting:
+Staff and administrators can still report there, and an administrator decides.
 
 ## Configuring a district
 
-The setup screen shows the workflow as connected cards. Select Reporting or a
-review card to edit it in the configuration panel; use the + between cards to
-insert a review. The panel has separate sections for duties and people, alerts,
-and managers. On smaller screens it opens as a drawer so the chart stays readable.
+The page shows each district's workflow as a tree you can drag around: who can
+report, each review step, the final decision and its two outcomes. Add and remove
+people where they appear, and use **+ Review step** to add a review. **Advanced
+editor** opens the configuration panel, with separate sections for duties and
+people, alerts, and managers, for shared duties and step-specific alerts.
 
 - Create any number of named duties, with any number of registered active users
   in each. A person can hold several duties and work in multiple districts.
@@ -32,8 +36,11 @@ and managers. On smaller screens it opens as a drawer so the chart stays readabl
   with maintenance handling; only the final step can refer to GeoTech.
 - Optionally let reviewers ask the reporter for more information.
 
-The **Maintenance Work** page and the mobile **Maintenance** tab show readable
-reports and a **Waiting on me** filter. Review notes are required. Unanimous
+Reports wait in **My Work**, the one queue every user has: each person sees
+the reports at their step, and can also show the other reports they may read.
+Administrators can show geotechnical work, maintenance work or both. Links to
+the former Maintenance Work page (`/maintenance-work?incident=N`, as in earlier
+notifications) open the report in My Work. Review notes are required. Unanimous
 decision makers must agree on the same outcome and Incident Group. A GeoTech
 referral uses the existing assessment creation, office routing and notification
 logic. Maintenance handling ends maintenance review without creating an
@@ -52,8 +59,8 @@ step one so previous approvals cannot silently cover changed content.
 Report actions use a database row lock and a version check. Stale actions,
 duplicate approvals, steps taken out of order and changes after a terminal
 outcome are refused. Decisions, workflow state, history and notification intents
-commit in the same transaction. Legacy coordinator actions cannot bypass an
-open configured workflow. No existing job-title role is granted or changed.
+commit in the same transaction. The older triage actions cannot bypass an
+open configured workflow. No job-title role is granted or changed.
 
 ## Deployment and validation
 

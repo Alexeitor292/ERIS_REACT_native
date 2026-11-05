@@ -1,0 +1,9 @@
+# Xcode and SwiftPM build output. ERIS.xcodeproj itself IS committed (by CI).
+build/
+DerivedData/
+.build/
+.swiftpm/
+xcuserdata/
+*.xcuserstate
+*.ipa
+*.xcarchive

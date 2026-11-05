@@ -100,7 +100,7 @@ exists would itself leak information.
        incident_id: int = Path(..., ge=1),
        body: NoteIn = Body(...),
        db: Session = Depends(get_db),
-       user=Depends(require_roles(["MAINTENANCE_COORDINATOR", "OFFICE_CHIEF"])),
+       user=Depends(require_roles(["STAFF", "OFFICE_CHIEF"])),
    ):
        incident = db.execute(text("SELECT id, district FROM incidents WHERE id = :id"),
                              {"id": incident_id}).mappings().first()

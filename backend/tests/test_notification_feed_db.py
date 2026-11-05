@@ -75,8 +75,8 @@ def test_reading_clears_the_badge(client_db, cast):
 
 
 def test_a_new_field_report_reaches_the_districts_coordinator(client_db):
-    crew = _login(client_db, "mock.maintenance.crew@dot.ca.gov")
-    coordinator = _login(client_db, "mock.coordinator.d01@dot.ca.gov")
+    crew = _login(client_db, "mock.staff@dot.ca.gov")
+    coordinator = _login(client_db, "mock.admin@dot.ca.gov")
     before = {n["id"] for n in _feed(client_db, coordinator)["items"]}
     report = client_db.post(
         "/incidents",

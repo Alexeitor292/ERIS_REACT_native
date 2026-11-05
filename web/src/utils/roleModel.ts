@@ -4,13 +4,12 @@
 // controls a user cannot use. All authority is enforced server-side; never
 // rely on these helpers for security.
 //
-// Seven work roles and the Administrator, one code each. Migration
+// Six work roles and the Administrator, one code each. Migration
 // 20260923_roles_consolidated moved every account off the earlier codes, and
 // nothing here accepts one.
 
 export const ROLES = {
-  MAINTENANCE_CREW: "MAINTENANCE_CREW",
-  MAINTENANCE_COORDINATOR: "MAINTENANCE_COORDINATOR",
+  MAINTENANCE: "MAINTENANCE",
   OFFICE_CHIEF: "OFFICE_CHIEF",
   BRANCH_CHIEF: "BRANCH_CHIEF",
   SENIOR_SPECIALIST: "SENIOR_SPECIALIST",
@@ -23,8 +22,7 @@ export type RoleCode = (typeof ROLES)[keyof typeof ROLES];
 
 /** Every role, in the order they are presented. */
 export const ALL_ROLE_NAMES: readonly RoleCode[] = [
-  ROLES.MAINTENANCE_CREW,
-  ROLES.MAINTENANCE_COORDINATOR,
+  ROLES.MAINTENANCE,
   ROLES.OFFICE_CHIEF,
   ROLES.BRANCH_CHIEF,
   ROLES.SENIOR_SPECIALIST,
@@ -34,8 +32,7 @@ export const ALL_ROLE_NAMES: readonly RoleCode[] = [
 ];
 
 const ROLE_LABELS: Record<RoleCode, string> = {
-  MAINTENANCE_CREW: "Maintenance Crew",
-  MAINTENANCE_COORDINATOR: "Maintenance Coordinator",
+  MAINTENANCE: "Maintenance",
   OFFICE_CHIEF: "Office Chief",
   BRANCH_CHIEF: "Branch Chief",
   SENIOR_SPECIALIST: "Senior Specialist",
@@ -44,7 +41,7 @@ const ROLE_LABELS: Record<RoleCode, string> = {
   ADMIN: "Administrator",
 };
 
-const MAINTENANCE_REPORTING = new Set<string>([ROLES.MAINTENANCE_CREW]);
+const MAINTENANCE_REPORTING = new Set<string>([ROLES.MAINTENANCE]);
 
 /**
  * The operational surface. `GUEST` is deliberately absent: the operational
@@ -53,7 +50,6 @@ const MAINTENANCE_REPORTING = new Set<string>([ROLES.MAINTENANCE_CREW]);
  * being handed everything (org model design §4.1).
  */
 export const OPERATIONAL_ROLE_NAMES = [
-  ROLES.MAINTENANCE_COORDINATOR,
   ROLES.OFFICE_CHIEF,
   ROLES.BRANCH_CHIEF,
   ROLES.STAFF,
@@ -73,7 +69,6 @@ const PUBLIC_VIEW = new Set<string>(PUBLIC_VIEW_ROLE_NAMES);
  * silently acquire a queue (org model design §8).
  */
 export const WORK_QUEUE_ROLE_NAMES = [
-  ROLES.MAINTENANCE_COORDINATOR,
   ROLES.OFFICE_CHIEF,
   ROLES.BRANCH_CHIEF,
   ROLES.STAFF,
@@ -82,14 +77,14 @@ export const WORK_QUEUE_ROLE_NAMES = [
 ] as const;
 const WORK_QUEUE = new Set<string>(WORK_QUEUE_ROLE_NAMES);
 
-/** Everyone who does work in ERIS: operational plus the Maintenance Crew, never the guest. */
-export const WORKFORCE_ROLE_NAMES = [...OPERATIONAL_ROLE_NAMES, ROLES.MAINTENANCE_CREW] as const;
+/** Everyone who does work in ERIS: operational plus Maintenance, never the guest. */
+export const WORKFORCE_ROLE_NAMES = [...OPERATIONAL_ROLE_NAMES, ROLES.MAINTENANCE] as const;
 
 /**
  * Route gates that admit the guest.
  *
- * `ASSESSMENT_READ_ROLE_NAMES` is the operational set plus the guest: the
- * Maintenance Crew is refused assessments by the server, so the client must not
+ * `ASSESSMENT_READ_ROLE_NAMES` is the operational set plus the guest: 
+ * Maintenance is refused assessments by the server, so the client must not
  * offer them either. `RECORD_READ_ROLE_NAMES` is every role — it states who may
  * open a single record explicitly, in place of "any account that happens to be
  * signed in".
@@ -139,8 +134,9 @@ export function isPublicOnly(roles: string[] | undefined): boolean {
   return set.some((r) => PUBLIC_VIEW.has(r));
 }
 
+/** Deciding a report outside any workflow. Inside one, the workflow says who decides. */
 export function canTriage(roles: string[] | undefined): boolean {
-  return isAdmin(roles) || hasRole(roles, ROLES.MAINTENANCE_COORDINATOR);
+  return isAdmin(roles);
 }
 
 /** Office chief: hand an assessment off to a branch chief (the branch route). */
@@ -175,9 +171,21 @@ export function isAssessmentAuthor(roles: string[] | undefined): boolean {
   return isAdmin(roles) || hasRole(roles, ROLES.STAFF) || hasRole(roles, ROLES.SENIOR_SPECIALIST);
 }
 
-/** Roles that can have workflow steps waiting on them (My Work). */
-export function hasWorkQueue(roles: string[] | undefined): boolean {
-  return (roles ?? []).some((r) => WORK_QUEUE.has(r));
+/**
+ * Whether this account holds a duty in a district maintenance workflow. Those
+ * duties come from the district's workflow, not from a role, and their reports
+ * wait in My Work like everything else.
+ */
+export function hasMaintenanceDuties(account: { maintenance_districts?: unknown[] | null } | null | undefined): boolean {
+  return (account?.maintenance_districts?.length ?? 0) > 0;
+}
+
+/**
+ * Who can have workflow steps waiting on them (My Work): the roles below, and
+ * anyone with district maintenance duties.
+ */
+export function hasWorkQueue(roles: string[] | undefined, maintenanceDuties = false): boolean {
+  return maintenanceDuties || (roles ?? []).some((r) => WORK_QUEUE.has(r));
 }
 
 /**
@@ -185,14 +193,14 @@ export function hasWorkQueue(roles: string[] | undefined): boolean {
  * sends it. A guest has no queue and no Home, so their landing is the record
  * they came for (org model design §8).
  */
-export function landingPathFor(roles: string[] | undefined): string {
-  return hasWorkQueue(roles) ? "/my-work" : "/incidents";
+export function landingPathFor(roles: string[] | undefined, maintenanceDuties = false): string {
+  return hasWorkQueue(roles, maintenanceDuties) ? "/my-work" : "/incidents";
 }
 
 /**
- * Roles allowed to file a new incident report — exactly the server's
- * FIELD_REPORTING_ROLES: the Maintenance Crew, Staff and administrators.
+ * Who may file a new incident report: Staff and administrators, and anyone given
+ * reporting duty in a district's workflow. Maintenance holds no such right by role.
  */
-export function canReportIncident(roles: string[] | undefined): boolean {
-  return isAdmin(roles) || hasRole(roles, ROLES.MAINTENANCE_CREW) || hasRole(roles, ROLES.STAFF);
+export function canReportIncident(roles: string[] | undefined, hasReportingDuty = false): boolean {
+  return isAdmin(roles) || hasRole(roles, ROLES.STAFF) || hasReportingDuty;
 }

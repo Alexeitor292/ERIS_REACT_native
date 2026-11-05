@@ -246,13 +246,13 @@ Each role sees only what it can use:
 
 | Role | Navigation |
 | --- | --- |
-| Maintenance Crew | Incidents (their own reports, and "Report an incident"), Settings |
-| Maintenance Coordinator, Office Chief, Branch Chief, Senior Specialist, Staff | My Work, Mission Center, Incident Groups, Incidents, Assessments, Terrain Cross Sections, Settings. Staff can also report incidents. Office chiefs also get My office, and branch chiefs My branch (their part of the organization tree). |
+| Maintenance | Incidents (their own reports, and "Report an incident" with a reporting part in a workflow), My Work with any part, Settings |
+| Office Chief, Branch Chief, Senior Specialist, Staff | My Work, Mission Center, Incident Groups, Incidents, Assessments, Terrain Cross Sections, Settings. Staff can also report incidents. Office chiefs also get My office, and branch chiefs My branch (their part of the organization tree). |
 | Guest | Incidents and Assessments (approved records only), Settings |
-| Administrator | Everything above, plus Users, Organization (every office tree and the maintenance lists) and Road Inventory |
+| Administrator | Everything above, plus Users, Organization (every office tree and each district's maintenance workflow) and Road Inventory |
 
 Work roles land on **My Work**, the list of steps waiting on them; Maintenance
-Crew and Guests land on **Incidents**. The routes and their role gates are in
+and Guests land on **Incidents**. The routes and their role gates are in
 `web/src/App.tsx` and `web/src/utils/roleModel.ts`. The client hides what a role
 cannot use, and the server enforces it.
 
@@ -260,13 +260,13 @@ cannot use, and the server enforces it.
 
 Tabs by role (`mobile/app/(tabs)/_layout.tsx`):
 
-- **Incidents** for every work role: Maintenance Crew and Staff file reports with
-  the phone's GPS, route and postmile, or a map; coordinators and chiefs follow
+- **Incidents** for every work role: Maintenance reporters and Staff file reports with
+  the phone's GPS, route and postmile, or a map; chiefs follow
   their cases.
 - **Drafts** and **Submissions** for Staff, Senior Specialists and
   administrators, who fill technical forms, with offline drafts that sync when
   the phone is back online.
-- **Assessments** for work roles other than the Maintenance Crew.
+- **Assessments** for work roles other than Maintenance.
 - A Guest who signs in is told to use the web app.
 
 Maps, the site photo map and offline 3D terrain use native iOS screens
@@ -278,10 +278,10 @@ Maps, the site photo map and offline 3D terrain use native iOS screens
 | --- | --- | --- |
 | Caltrans SHN Postmiles Tenth (ArcGIS FeatureServer) | web, mobile, backend | Coordinates ↔ district, county, route and postmile; road inventory packages |
 | Caltrans CRS Functional Classification | web (optional overlay), worker (optional road source) | Freeway and expressway lines |
-| Esri ArcGIS basemaps and World Elevation | web, mobile | Maps and the 3D terrain view |
+| Esri ArcGIS basemaps and World Elevation | web, mobile | Maps and the website's 3D view, to look at. See [map licensing](../operations/map-licensing.md) |
 | Google Maps | web | Street View (embedded with an API key, otherwise in a new tab) |
-| USGS 3DEP elevation (ImageServer and EPQS) | worker, backend | Terrain packages, elevation profiles, terrain grids |
-| USGS 3DEP Elevation Index; Esri World Elevation Data Extents | web | Which lidar the terrain at a map's center comes from, and when it was flown |
+| USGS 3DEP elevation (ImageServer and EPQS) | worker, backend, web | Measuring a site on the website and iPhone, Terrain Cross Sections, terrain packages, elevation profiles, terrain grids |
+| USGS 3DEP Elevation Index; Esri World Elevation Data Extents | web | The Terrain Cross Sections coverage colours; which lidar the terrain at a map's center comes from, and when it was flown |
 | USGS NAIP imagery | worker (optional) | Aerial imagery in terrain packages |
 | U.S. Census TIGERweb | worker (optional) | Road context in terrain packages |
 

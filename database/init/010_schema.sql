@@ -286,6 +286,8 @@ CREATE TABLE IF NOT EXISTS incidents (
     resolved_at DATETIME NULL,
     resolved_by_user_id BIGINT NULL,
     resolution_comment TEXT NULL,
+    district_contact_user_id BIGINT NULL,
+    CONSTRAINT fk_incident_district_contact FOREIGN KEY (district_contact_user_id) REFERENCES users(id) ON DELETE SET NULL,
     CONSTRAINT fk_incident_reporter FOREIGN KEY (reporter_user_id) REFERENCES users(id) ON DELETE RESTRICT,
     CONSTRAINT fk_incident_location FOREIGN KEY (location_id) REFERENCES incident_locations(id) ON DELETE SET NULL,
     CONSTRAINT fk_incident_location_reviewed_by FOREIGN KEY (location_reviewed_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
@@ -466,11 +468,9 @@ CREATE TABLE IF NOT EXISTS submission_gisa (
 
     -- Section D: Pavement / Ground condition metrics
     pavement_ground_annotation_layout_json JSON NULL COMMENT 'JSON blob storing drag-placed annotation positions for the pavement diagram',
+    -- Each crack is its own row in submission_gisa_cracks; this is the
+    -- "Pavement/Ground Cracks" answer itself.
     pavement_ground_cracks TINYINT NOT NULL DEFAULT 0 COMMENT 'Boolean (0=No, 1=Yes)',
-    crack_length_ft DECIMAL(10,2) NULL,
-    crack_horizontal_in DECIMAL(10,2) NULL,
-    crack_vertical_in DECIMAL(10,2) NULL,
-    crack_depth_in DECIMAL(10,2) NULL,
     settlement_in DECIMAL(10,2) NULL,
     bulge_in DECIMAL(10,2) NULL,
     indented_by_rocks TINYINT NOT NULL DEFAULT 0 COMMENT 'Boolean (0=No, 1=Yes)',
@@ -678,6 +678,61 @@ CREATE TABLE IF NOT EXISTS submission_gisa_actions (
       CHECK (action_group IN ('IMMEDIATE', 'FOLLOW_UP'))
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS submission_gisa_cracks (
+    -- One row per pavement/ground crack. GISA-001 asks to "map cracks":
+    -- each crack's location, length, width, horizontal and vertical
+    -- displacement, depth and direction. Every crack is its own record with the
+    -- same fields; see Alembic 20261029_submission_cracks.
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    submission_id BIGINT NOT NULL,
+    -- Made by the client, so a retried or offline-queued create is recognised.
+    client_uuid CHAR(36) NOT NULL,
+    sort_order INT NOT NULL,
+    label VARCHAR(80) NULL,
+    latitude DECIMAL(10,7) NULL,
+    longitude DECIMAL(10,7) NULL,
+    location_source VARCHAR(16) NULL, -- PHOTO (approximate) | MAP | MANUAL
+    geometry_json JSON NULL,          -- the mapped trace, GeoJSON Point or LineString
+    trend_deg DECIMAL(5,1) NULL,      -- compass direction of the crack line, 0 to < 180
+    orientation VARCHAR(16) NULL,     -- relative to the roadway
+    length_ft DECIMAL(10,2) NULL,
+    width_in DECIMAL(10,2) NULL,
+    horizontal_disp_in DECIMAL(10,2) NULL,
+    vertical_disp_in DECIMAL(10,2) NULL,
+    depth_in DECIMAL(10,2) NULL,
+    notes TEXT NULL,
+    photo_attachment_id BIGINT NULL,  -- the crack's photo, an ordinary form photo
+    annotations_json JSON NULL,       -- shapes drawn over that photo, in 0..1 image coordinates
+    revision INT NOT NULL DEFAULT 1,
+    created_by_user_id BIGINT NOT NULL,
+    updated_by_user_id BIGINT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT uq_gisa_crack_client_uuid UNIQUE (client_uuid),
+    CONSTRAINT fk_gisa_crack_submission
+      FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE,
+    CONSTRAINT fk_gisa_crack_photo
+      FOREIGN KEY (photo_attachment_id) REFERENCES attachments(id) ON DELETE SET NULL,
+    CONSTRAINT fk_gisa_crack_creator
+      FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_gisa_crack_editor
+      FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+    INDEX idx_gisa_crack_submission (submission_id, sort_order, id),
+    CONSTRAINT chk_gisa_crack_location_pair
+      CHECK ((latitude IS NULL) = (longitude IS NULL)),
+    CONSTRAINT chk_gisa_crack_lat CHECK (latitude IS NULL OR (latitude >= -90 AND latitude <= 90)),
+    CONSTRAINT chk_gisa_crack_lon CHECK (longitude IS NULL OR (longitude >= -180 AND longitude <= 180)),
+    CONSTRAINT chk_gisa_crack_location_source
+      CHECK (location_source IS NULL OR location_source IN ('PHOTO', 'MAP', 'MANUAL')),
+    CONSTRAINT chk_gisa_crack_trend CHECK (trend_deg IS NULL OR (trend_deg >= 0 AND trend_deg < 180)),
+    CONSTRAINT chk_gisa_crack_orientation
+      CHECK (orientation IS NULL OR orientation IN ('LONGITUDINAL', 'TRANSVERSE', 'DIAGONAL', 'ARCUATE', 'OTHER')),
+    CONSTRAINT chk_gisa_crack_measures CHECK (
+      (length_ft IS NULL OR length_ft >= 0) AND (width_in IS NULL OR width_in >= 0)
+      AND (horizontal_disp_in IS NULL OR horizontal_disp_in >= 0)
+      AND (vertical_disp_in IS NULL OR vertical_disp_in >= 0) AND (depth_in IS NULL OR depth_in >= 0))
+) ENGINE=InnoDB;
+
 -- Offline 3D scene-package catalog.
 -- Authoritative record of operator-authored, S3-stored .mspk packages for the
 -- mobile native 3D terrain viewer. A submission is offline-available ONLY when a
@@ -811,4 +866,65 @@ CREATE TABLE IF NOT EXISTS offline_scene_worker_heartbeats (
     last_stage VARCHAR(48) NULL,
     PRIMARY KEY (worker_id),
     INDEX idx_oswh_last_seen (last_seen)
+) ENGINE=InnoDB;
+
+-- Out of the office (services/delegations.py).
+CREATE TABLE IF NOT EXISTS user_delegations (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    delegator_user_id BIGINT NOT NULL,
+    delegate_user_id BIGINT NOT NULL,
+    starts_on DATE NOT NULL,
+    ends_on DATE NOT NULL,
+    note VARCHAR(500) NULL,
+    created_by_user_id BIGINT NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    cancelled_at DATETIME NULL,
+    cancelled_by_user_id BIGINT NULL,
+    CONSTRAINT fk_delegation_delegator FOREIGN KEY (delegator_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_delegation_delegate FOREIGN KEY (delegate_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_delegation_creator FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_delegation_canceller FOREIGN KEY (cancelled_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+    CONSTRAINT chk_delegation_dates CHECK (starts_on <= ends_on),
+    CONSTRAINT chk_delegation_people CHECK (delegator_user_id <> delegate_user_id),
+    INDEX ix_delegation_delegate (delegate_user_id, starts_on, ends_on),
+    INDEX ix_delegation_delegator (delegator_user_id, starts_on, ends_on)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS delegated_actions (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    delegation_id BIGINT NOT NULL,
+    actor_user_id BIGINT NOT NULL,
+    acting_for_user_id BIGINT NOT NULL,
+    method VARCHAR(8) NOT NULL,
+    path VARCHAR(255) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_delegated_action_delegation FOREIGN KEY (delegation_id) REFERENCES user_delegations(id) ON DELETE CASCADE,
+    CONSTRAINT fk_delegated_action_actor FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_delegated_action_for FOREIGN KEY (acting_for_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX ix_delegated_action_delegation (delegation_id, created_at)
+) ENGINE=InnoDB;
+
+-- District contacts and immediate action deliveries (services/district_contact.py).
+CREATE TABLE IF NOT EXISTS org_district_settings (
+    district VARCHAR(8) PRIMARY KEY,
+    contact_user_id BIGINT NULL,
+    updated_by_user_id BIGINT NULL,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_district_setting_contact FOREIGN KEY (contact_user_id) REFERENCES users(id) ON DELETE SET NULL,
+    CONSTRAINT fk_district_setting_editor FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS immediate_action_deliveries (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    submission_id BIGINT NOT NULL,
+    actor_user_id BIGINT NOT NULL,
+    client_uuid CHAR(36) NOT NULL,
+    actions_json JSON NOT NULL,
+    description TEXT NOT NULL,
+    written_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_immediate_delivery_client UNIQUE (client_uuid),
+    CONSTRAINT fk_immediate_delivery_submission FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE,
+    CONSTRAINT fk_immediate_delivery_actor FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE RESTRICT,
+    INDEX ix_immediate_delivery_submission (submission_id, created_at)
 ) ENGINE=InnoDB;

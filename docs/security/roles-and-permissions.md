@@ -12,10 +12,9 @@ Seven work roles and the Administrator. One code each, with no aliases.
 
 | Code | Name | What it is for |
 | --- | --- | --- |
-| `MAINTENANCE_CREW` | Maintenance Crew | Files field reports from the road. Sees only their own reports. No assessments. |
-| `MAINTENANCE_COORDINATOR` | Maintenance Coordinator | Triages field reports in the districts they cover and runs Incident Groups. Only "Assessment required" puts a report on the record. |
-| `OFFICE_CHIEF` | Office Chief | Routes their GeoTech office's assessments: hands one to a branch chief, or assigns a Senior Specialist directly. Reviews the Senior Specialist route. |
-| `BRANCH_CHIEF` | Branch Chief | Assigns Staff to the assessments handed to their branch, and reviews the branch route. |
+| `MAINTENANCE` | Maintenance | Their own reports. Everything more comes from their part in a district's workflow: reporting, reviewing, the final decision, reading the district, changing the workflow. No assessments. |
+| `OFFICE_CHIEF` | Office Chief | Routes their GeoTech office's assessments: hands one to a branch chief of that office, or assigns a Senior Specialist of that office directly. Reviews the Senior Specialist route. |
+| `BRANCH_CHIEF` | Branch Chief | Assigns the Staff of their own branch to the assessments handed to it, and reviews the branch route. |
 | `SENIOR_SPECIALIST` | Senior Specialist | Fills the assessments an office chief assigns directly. |
 | `STAFF` | Staff | Fills the assessments a branch chief assigns, and can file field reports. |
 | `GUEST` | Guest | Read-only. Sees approved and finalized records statewide. No work queue, no workflow step and no mobile surface. Anyone placed nowhere is a guest. |
@@ -23,8 +22,8 @@ Seven work roles and the Administrator. One code each, with no aliases.
 
 **Where a person sits decides their work role** (`services/org_tree.py`): the top of an
 office tree is Office Chief, leading a branch Branch Chief, a leaf under the office chief
-Senior Specialist, under a branch Staff, a district's coordinator list Maintenance
-Coordinator and its crew list Maintenance Crew; placed nowhere, Guest. Every change of
+Senior Specialist, under a branch Staff; anyone named in a district's maintenance workflow
+Maintenance; placed nowhere, Guest. Every change of
 place rewrites the person's `user_roles` at once, so the guards below keep reading
 `user_roles` unchanged. Administrator is the only role granted directly (Administration ›
 Users). The page, who may edit which part, and the migration that placed existing
@@ -55,7 +54,7 @@ Rules that hold across the system:
   open to every operational user; a form outside any assessment opens once it
   is approved itself. Anyone else is told the form is in progress and can ask
   its owner to share it (`backend/app/services/form_access.py`).
-- **Scope narrows the reach.** A coordinator reads the districts they cover;
+- **Scope narrows the reach.** Maintenance reads what their workflow part allows;
   office and branch chiefs read their office; Staff and Senior Specialists read
   what they are assigned. A missing district or office reads nothing (fail
   closed).
@@ -74,16 +73,37 @@ Per-record grants sit beside the roles and never widen them:
   - **Inside one branch** it goes through at once; the branch chief is told and
     may stop it.
   - **Office chiefs are told**, and may stop it, when a share leaves their
-    office or involves one of their Senior Specialists. They never have to
-    approve: if they do nothing, it stands.
+    office or involves one of their Senior Specialists. Nothing is asked of them:
+    if they do nothing, it stands.
+  - **The one thing an office chief approves:** a Senior Specialist sharing with a
+    Senior Specialist in another office needs both office chiefs.
 
-  So Senior Specialist to Senior Specialist goes through at once (their office
-  chiefs told); staff to a Senior Specialist needs the staff member's branch
-  chief (the office chiefs told). A branch with no chief is decided by its
-  office chiefs, and an administrator may decide for any branch or office.
-  Approvals and notices wait in the chiefs' **My Work**. Stopping a share takes
+  So Senior Specialist to Senior Specialist in one office goes through at once
+  (their office chief told); to Staff of their office, that staff member's branch
+  chief approves (the office chief told); staff to a Senior Specialist needs the
+  staff member's branch chief (the office chiefs told). A branch with no chief is
+  decided by its office chiefs, and an administrator may decide for any branch or
+  office.
+  **A chief is only asked for what needs them:** an approval waits in their
+  **My Work**, and a notice is just a notification that opens the share if they
+  want to stop it. Stopping a share takes
   the person's access away. Grants from before sharing needed approval stay as
   they were. Every route that honors a grant refuses a guest-only account first.
+- **Standing in for someone away** (`user_delegations`, `services/delegations.py`).
+  Someone names a colleague in the same office, or on the same district's lists or
+  workflow, between two dates (Settings › Out of office on the web, Account on the
+  phone). For time off they cannot set themselves, such as an emergency, their direct
+  supervisor can: a Staff member's branch chief, or a branch chief's or Senior
+  Specialist's office chief. An administrator can too.
+  While it runs the colleague may switch to acting for them: each request carries
+  `X-ERIS-Acting-For`, and the server judges it as the absent person, so their
+  queues, scope and steps all follow. Every write goes in `delegated_actions`, and
+  timelines and share decisions name both people. Administrator does not pass;
+  accounts, the organization and delegations cannot be changed while acting; and
+  nobody can review their own form or decide a share of their own that way. It ends
+  by itself after the last day, and either person can end it sooner. The person
+  acting gets a copy of each notice with no link: the step waits in the absent
+  person's queue.
 - **Consulted on an assessment** (`assessment_assignments.assignment_role =
   'CONSULTED'`). An office chief, a branch chief or an administrator attaches
   an operational user for information. Consulted confers no authority: it
@@ -150,9 +170,9 @@ production:
 | Account | Role |
 | --- | --- |
 | `mock.admin@dot.ca.gov` | Administrator only |
-| `mock.maintenance.crew@dot.ca.gov` | Maintenance Crew |
-| `mock.coordinator.d01@dot.ca.gov` | Maintenance Coordinator, district 01 |
-| `mock.coordinator.d04@dot.ca.gov` | Maintenance Coordinator, district 04 |
+| `mock.maintenance.crew@dot.ca.gov` | Maintenance |
+| `mock.coordinator.d01@dot.ca.gov` | Maintenance, district 01 |
+| `mock.coordinator.d04@dot.ca.gov` | Maintenance, district 04 |
 | `mock.office.chief@dot.ca.gov` | Office Chief, WEST |
 | `mock.branch.chief@dot.ca.gov` | Branch Chief, WEST Branch A |
 | `mock.senior.specialist@dot.ca.gov` | Senior Specialist, WEST |
@@ -175,8 +195,7 @@ read them with this table:
 
 | Retired code | Now |
 | --- | --- |
-| `MAINTENANCE`, `MAINTENANCE_FIELD_WORKER` | `MAINTENANCE_CREW` |
-| `MAINT_COORDINATOR` | `MAINTENANCE_COORDINATOR` |
+| `MAINTENANCE_CREW`, `MAINTENANCE_FIELD_WORKER`, `MAINTENANCE_COORDINATOR`, `MAINT_COORDINATOR` | `MAINTENANCE` |
 | `GEOTECH_OFFICE_CHIEF` | `OFFICE_CHIEF` |
 | `GEOTECH_BRANCH_CHIEF` | `BRANCH_CHIEF` |
 | `GEOTECH_SENIOR_ENGINEER` ("Senior Engineer") | `SENIOR_SPECIALIST` |

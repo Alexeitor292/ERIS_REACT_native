@@ -1,38 +1,37 @@
-// The terrain model the technical form measures against: Esri World Elevation
-// (USGS 3DEP lidar where it exists), loaded once per page and queried at the
-// finest resolution that covers every point asked for.
+// The terrain model the technical form measures against: USGS 3DEP, read through ERIS from the
+// same tiles as the iPhone, so both get the same heights. The 3D map still shows Esri's ground,
+// which is for looking at; values that get saved come from here. See docs/operations/map-licensing.md.
 
-export type LonLat = [number, number];
+import { appConfig } from "../../config";
+import { groundSpacingM, heightsAt, readElevationTile, type ElevationTile, type LonLat } from "./elevationTile";
 
-let groundPromise: Promise<any> | null = null;
+export type { LonLat };
 
-export function worldElevationGround(): Promise<any> {
-  if (!groundPromise) {
-    groundPromise = (async () => {
-      const [{ default: esriConfig }, { default: ArcGisMap }] = await Promise.all([import("@arcgis/core/config"), import("@arcgis/core/Map")]);
-      const apiKey = import.meta.env.VITE_ARCGIS_API_KEY;
-      if (apiKey) esriConfig.apiKey = String(apiKey);
-      const map = new ArcGisMap({ ground: "world-elevation" });
-      await map.ground.loadAll();
-      return map.ground;
-    })().catch((error) => {
-      groundPromise = null;
-      throw error;
-    });
+// Tiles never change under the same address, so one read is enough for the page.
+const tiles = new Map<string, Promise<ElevationTile | null>>();
+
+function tile(row: number, col: number): Promise<ElevationTile | null> {
+  const key = `${row}/${col}`;
+  let found = tiles.get(key);
+  if (!found) {
+    found = (async () => {
+      // The session cookie authenticates this read.
+      const response = await fetch(`${appConfig.apiBaseUrl}/elevation-tiles/${key}`, { credentials: "same-origin" });
+      if (response.status === 404) return null;
+      if (!response.ok) throw new Error(`Could not read the USGS elevation (${response.status}).`);
+      return readElevationTile(await response.arrayBuffer());
+    })();
+    tiles.set(key, found);
+    // A failure is not kept: the next measurement tries again.
+    found.catch(() => tiles.delete(key));
   }
-  return groundPromise;
+  return found;
 }
 
-/** Elevations (metres) at [lon, lat] points from Esri World Elevation, finest resolution that covers them all. */
+/** Elevations (metres) at [lon, lat] points from USGS 3DEP, and how far apart they were read. */
 export async function sampleElevations(points: LonLat[]): Promise<{ z: Array<number | null>; resolution: { min: number; max: number } | null }> {
   if (!points.length) return { z: [], resolution: null };
-  const [ground, { default: Multipoint }] = await Promise.all([worldElevationGround(), import("@arcgis/core/geometry/Multipoint")]);
-  const geometry = new Multipoint({ points: points.map(([lon, lat]) => [lon, lat]), spatialReference: { wkid: 4326 } });
-  const result = await ground.queryElevation(geometry, { demResolution: "finest-contiguous", returnSampleInfo: true });
-  const noData = result.noDataValue;
-  const z: Array<number | null> = (result.geometry.points as number[][]).map((p) => (Number.isFinite(p[2]) && p[2] !== noData ? p[2] : null));
-  const resolutions = ((result.sampleInfo ?? []) as Array<{ demResolution?: number }>)
-    .map((info) => Number(info.demResolution))
-    .filter((value) => Number.isFinite(value) && value > 0);
-  return { z, resolution: resolutions.length ? { min: Math.min(...resolutions), max: Math.max(...resolutions) } : null };
+  const z = await heightsAt(points, tile);
+  const spacing = groundSpacingM(points.reduce((sum, [, lat]) => sum + lat, 0) / points.length);
+  return { z, resolution: { min: spacing, max: spacing } };
 }

@@ -272,10 +272,31 @@ def client_db():
     Run only with: pytest -m db
     """
     _install_permanent_incident_test_cleanup_adapter()
+    from app import deps
     from app.main import app
-    with TestClient(app) as c:
-        _install_project_aware_db_client(c)
-        yield c
+    # These tests sign in with a bearer token for convenience, guests too, to check
+    # what the API answers them on the web. The phone apps' own rule, which refuses a
+    # guest's bearer token, is tested on its own (test_app_access, test_delegations_db).
+    phone_rule = deps.may_use_app
+    deps.may_use_app = lambda db, user: True
+    # A hand-off has to name a District Contact; the tests that are about something
+    # else hand off with none. test_field_notices_db restores the rule for its own.
+    from app.services import district_contact
+    naming_rule = district_contact.choose
+
+    def lenient(*, requested, default, eligible):
+        if requested is None and default not in eligible:
+            return None
+        return naming_rule(requested=requested, default=default, eligible=eligible)
+
+    district_contact.choose = lenient
+    try:
+        with TestClient(app) as c:
+            _install_project_aware_db_client(c)
+            yield c
+    finally:
+        deps.may_use_app = phone_rule
+        district_contact.choose = naming_rule
 
 
 @pytest.fixture(scope="session")

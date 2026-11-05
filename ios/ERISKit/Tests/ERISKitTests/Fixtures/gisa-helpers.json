@@ -1,0 +1,255 @@
+{
+  "postMile": [
+    {
+      "input": "12.3",
+      "output": "12.30"
+    },
+    {
+      "input": "12.345",
+      "output": "12.35"
+    },
+    {
+      "input": "1.005",
+      "output": "1.00"
+    },
+    {
+      "input": "0.995",
+      "output": "1.00"
+    },
+    {
+      "input": "-2.5",
+      "output": "-2.50"
+    },
+    {
+      "input": "abc",
+      "output": "abc"
+    },
+    {
+      "input": "  7 ",
+      "output": "7.00"
+    },
+    {
+      "input": "1e2",
+      "output": "100.00"
+    },
+    {
+      "input": "",
+      "output": null
+    },
+    {
+      "input": "12.3abc",
+      "output": "12.3abc"
+    },
+    {
+      "input": "Infinity",
+      "output": "Infinity"
+    },
+    {
+      "input": "0x10",
+      "output": "16.00"
+    }
+  ],
+  "route": [
+    {
+      "input": "80",
+      "output": "080"
+    },
+    {
+      "input": "I-5",
+      "output": "005"
+    },
+    {
+      "input": "SR 1",
+      "output": "001"
+    },
+    {
+      "input": "1234",
+      "output": "123"
+    },
+    {
+      "input": "abc",
+      "output": "abc"
+    },
+    {
+      "input": "",
+      "output": null
+    },
+    {
+      "input": " 99 ",
+      "output": "099"
+    },
+    {
+      "input": "US-101X",
+      "output": "101"
+    }
+  ],
+  "coordinate": [
+    {
+      "input": "37.7312345678",
+      "output": "37.731235"
+    },
+    {
+      "input": "-122.19750049",
+      "output": "-122.197500"
+    },
+    {
+      "input": "-0.0000001",
+      "output": "0.000000"
+    },
+    {
+      "input": "abc",
+      "output": ""
+    },
+    {
+      "input": "",
+      "output": ""
+    },
+    {
+      "input": "1e-7",
+      "output": "0.000000"
+    },
+    {
+      "input": "37.0000005",
+      "output": "37.000001"
+    },
+    {
+      "input": "  -121.5  ",
+      "output": "-121.500000"
+    }
+  ],
+  "county": [
+    {
+      "input": "ALA",
+      "code": "ALA",
+      "district": "04",
+      "label": "Alameda (ALA)"
+    },
+    {
+      "input": "ala",
+      "code": "ALA",
+      "district": "04",
+      "label": "Alameda (ALA)"
+    },
+    {
+      "input": "Alameda",
+      "code": "ALA",
+      "district": "04",
+      "label": "Alameda (ALA)"
+    },
+    {
+      "input": "alameda county",
+      "code": "ALA",
+      "district": "04",
+      "label": "Alameda (ALA)"
+    },
+    {
+      "input": "San Luis Obispo County",
+      "code": "SLO",
+      "district": "05",
+      "label": "San Luis Obispo (SLO)"
+    },
+    {
+      "input": "Nowhere",
+      "code": null,
+      "district": null,
+      "label": ""
+    },
+    {
+      "input": "",
+      "code": null,
+      "district": null,
+      "label": ""
+    }
+  ],
+  "routesForSF": [
+    "001",
+    "035",
+    "080",
+    "082",
+    "101",
+    "280"
+  ],
+  "districts": [
+    "01",
+    "02",
+    "03",
+    "04",
+    "05",
+    "06",
+    "07",
+    "08",
+    "09",
+    "10",
+    "11",
+    "12"
+  ],
+  "countyCount": 58,
+  "statePlane": [
+    {
+      "latitude": 37.7312,
+      "longitude": -122.1975,
+      "county": "ALA",
+      "zone": 3,
+      "northing": 2093160.506702043,
+      "easting": 6070790.442787225,
+      "formattedNorthing": "2093160.507",
+      "backLatitude": 37.731199999999994,
+      "backLongitude": -122.1975
+    },
+    {
+      "latitude": 40.8021,
+      "longitude": -124.1637,
+      "county": "HUM",
+      "zone": 1,
+      "northing": 2182874.855437141,
+      "easting": 5962753.999666041,
+      "formattedNorthing": "2182874.855",
+      "backLatitude": 40.8021,
+      "backLongitude": -124.1637
+    },
+    {
+      "latitude": 34.0522,
+      "longitude": -118.2437,
+      "county": "LA",
+      "zone": 5,
+      "northing": 1841468.2513016984,
+      "easting": 6487847.0029828,
+      "formattedNorthing": "1841468.251",
+      "backLatitude": 34.052199999999985,
+      "backLongitude": -118.2437
+    },
+    {
+      "latitude": 32.7157,
+      "longitude": -117.1611,
+      "county": "SD",
+      "zone": 6,
+      "northing": 1841409.6412828453,
+      "easting": 6281427.138600585,
+      "formattedNorthing": "1841409.641",
+      "backLatitude": 32.7157,
+      "backLongitude": -117.1611
+    },
+    {
+      "latitude": 38.5816,
+      "longitude": -121.4944,
+      "county": "SAC",
+      "zone": 2,
+      "northing": 1974030.2408423945,
+      "easting": 6706196.508265191,
+      "formattedNorthing": "1974030.241",
+      "backLatitude": 38.581599999999995,
+      "backLongitude": -121.4944
+    },
+    {
+      "latitude": 36.7378,
+      "longitude": -119.7871,
+      "county": "FRE",
+      "zone": 4,
+      "northing": 2152653.3948756866,
+      "easting": 6331036.876453304,
+      "formattedNorthing": "2152653.395",
+      "backLatitude": 36.73780000000001,
+      "backLongitude": -119.7871
+    }
+  ]
+}

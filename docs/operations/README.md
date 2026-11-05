@@ -8,6 +8,7 @@ part runs: [deployment topologies](../architecture/deployment-topologies.md).
 | This page | Launching development, test (staging) and production; releasing; daily operations |
 | [Caltrans Podman runbook](caltrans-podman.md) | The authoritative production procedure: files, Entra, Jenkins and Harbor, releases, backup and restore, verification |
 | [Configuration](configuration.md) | Every setting |
+| [Map licensing](map-licensing.md) | What production needs from Esri and others, and the rules the code keeps to |
 | [Monitoring and troubleshooting](monitoring-and-troubleshooting.md) | Health, logs, alerts, diagnosing problems |
 | [Offline scene packages](offline-scene-packages.md) | Operating the 3D terrain worker |
 | [Compose deployment](compose-deployment.md) | The older Docker Compose server stack (development parity, history) |

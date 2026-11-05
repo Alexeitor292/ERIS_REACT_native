@@ -22,16 +22,16 @@ from app.roles import ALL_ROLES
 pytestmark = pytest.mark.db
 
 RETIRED = {
-    "MAINTENANCE", "MAINTENANCE_FIELD_WORKER", "MAINT_COORDINATOR", "GEOTECH_OFFICE_CHIEF",
+    "MAINTENANCE_CREW", "MAINTENANCE_COORDINATOR", "MAINTENANCE_FIELD_WORKER", "MAINT_COORDINATOR", "GEOTECH_OFFICE_CHIEF",
     "GEOTECH_BRANCH_CHIEF", "GEOTECH_ENGINEER", "GEOTECH_SENIOR_ENGINEER", "FIELD_WORKER",
     "CALTRANS_VIEWER", "REVIEWER",
 }
 
 SEEDED = {
     "mock.admin@dot.ca.gov": "ADMIN",
-    "mock.maintenance.crew@dot.ca.gov": "MAINTENANCE_CREW",
-    "mock.coordinator.d01@dot.ca.gov": "MAINTENANCE_COORDINATOR",
-    "mock.coordinator.d04@dot.ca.gov": "MAINTENANCE_COORDINATOR",
+    "mock.maintenance.crew@dot.ca.gov": "MAINTENANCE",
+    "mock.coordinator.d01@dot.ca.gov": "MAINTENANCE",
+    "mock.coordinator.d04@dot.ca.gov": "MAINTENANCE",
     "mock.office.chief@dot.ca.gov": "OFFICE_CHIEF",
     "mock.branch.chief@dot.ca.gov": "BRANCH_CHIEF",
     "mock.senior.specialist@dot.ca.gov": "SENIOR_SPECIALIST",

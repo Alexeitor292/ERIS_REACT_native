@@ -33,12 +33,12 @@ def _login(client_db, email: str) -> str:
 
 @pytest.fixture(scope="module")
 def coordinator_token(client_db):
-    return _login(client_db, "mock.coordinator.d01@dot.ca.gov")
+    return _login(client_db, "mock.admin@dot.ca.gov")
 
 
 @pytest.fixture(scope="module")
 def reporter_token(client_db):
-    return _login(client_db, "mock.maintenance.crew@dot.ca.gov")
+    return _login(client_db, "mock.staff@dot.ca.gov")
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -176,8 +176,8 @@ class TestTheReporterIsNamed:
         resp = client_db.get(f"/incidents/{report['incident_id']}", headers=_auth(coordinator_token))
         assert resp.status_code == 200, resp.text
         incident = resp.json()["incident"]
-        assert incident["reporter_name"] == "Mock Maintenance Crew"
-        assert incident["reporter_email"] == "mock.maintenance.crew@dot.ca.gov"
+        assert incident["reporter_name"] == "Mock Staff"
+        assert incident["reporter_email"] == "mock.staff@dot.ca.gov"
 
     def test_the_list_names_them_too_so_the_queue_and_the_review_agree(
         self, client_db, coordinator_token, report
@@ -185,4 +185,4 @@ class TestTheReporterIsNamed:
         resp = client_db.get("/incidents?limit=200", headers=_auth(coordinator_token))
         assert resp.status_code == 200
         rows = [row for row in resp.json()["items"] if row["id"] == report["incident_id"]]
-        assert rows and rows[0]["reporter_name"] == "Mock Maintenance Crew"
+        assert rows and rows[0]["reporter_name"] == "Mock Staff"

@@ -3,6 +3,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from ..timezones import server_naive
+
 
 class LoginRequest(BaseModel):
     email: str
@@ -62,10 +64,6 @@ class GisaDraftPatch(BaseModel):
     lanes_closed_count: int | None = None
     open_highway_traffic_lanes_count: int | None = None
     pavement_ground_cracks: bool | None = None
-    crack_length_ft: float | None = None
-    crack_horizontal_in: float | None = None
-    crack_vertical_in: float | None = None
-    crack_depth_in: float | None = None
     settlement_in: float | None = None
     bulge_in: float | None = None
     indented_by_rocks: bool | None = None
@@ -197,6 +195,12 @@ class IncidentCreate(BaseModel):
     post_mile: str = Field(..., min_length=1, max_length=64)
     road_inventory_context: RoadInventoryIncidentContext | None = None
 
+    @field_validator("first_observed_at", "first_occurred_at")
+    @classmethod
+    def _server_clock(cls, value: datetime | None) -> datetime | None:
+        # Stored without a zone, so a zoned time becomes the server's (Pacific) clock.
+        return server_naive(value)
+
 
 class IncidentAssignRequest(BaseModel):
     assignee_user_id: int = Field(..., ge=1)
@@ -295,6 +299,8 @@ class IncidentTriageRequest(BaseModel):
     # ASSESSMENT_REQUIRED only: the Incident Group, committed in the same
     # transaction as the decision. Omitted when the report is already grouped.
     event_group: TriageEventGroupChoice | None = None
+    # ASSESSMENT_REQUIRED only: who the hand-off names; omitted, the district's default.
+    district_contact_user_id: int | None = Field(default=None, ge=1)
 
 
 class AssessmentDelegateBranchRequest(BaseModel):

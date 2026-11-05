@@ -1,0 +1,546 @@
+{
+  "devices": [
+    {
+      "input": {
+        "position": {
+          "coords": {
+            "latitude": 37.7312,
+            "longitude": -122.1975,
+            "accuracy": 4.2,
+            "altitude": 12.5
+          },
+          "timestamp": 0
+        },
+        "direction": {
+          "heading": 123.4,
+          "accuracyCode": 3,
+          "reference": "TRUE_NORTH"
+        }
+      },
+      "output": {
+        "captured_at": "2026-10-28T19:01:10.123Z",
+        "latitude": 37.7312,
+        "longitude": -122.1975,
+        "horizontal_accuracy_m": 4.2,
+        "altitude_m": 12.5,
+        "camera_heading_deg": 123.39999999999998,
+        "camera_heading_accuracy_code": 3,
+        "heading_reference": "TRUE_NORTH",
+        "location_source": "DEVICE_AT_CAPTURE",
+        "heading_source": "DEVICE_TRUE_HEADING",
+        "provenance": null
+      }
+    },
+    {
+      "input": {
+        "position": {
+          "coords": {
+            "latitude": 37.7312,
+            "longitude": -122.1975,
+            "accuracy": 35,
+            "altitude": null
+          },
+          "timestamp": 0
+        },
+        "direction": {
+          "heading": 10,
+          "accuracyCode": 1,
+          "reference": "TRUE_NORTH"
+        }
+      },
+      "output": {
+        "captured_at": "2026-10-28T19:01:10.123Z",
+        "latitude": 37.7312,
+        "longitude": -122.1975,
+        "horizontal_accuracy_m": 35,
+        "altitude_m": null,
+        "camera_heading_deg": null,
+        "camera_heading_accuracy_code": null,
+        "heading_reference": null,
+        "location_source": "DEVICE_AT_CAPTURE",
+        "heading_source": null,
+        "provenance": null
+      }
+    },
+    {
+      "input": {
+        "position": null,
+        "direction": {
+          "heading": 359.9,
+          "accuracyCode": 2,
+          "reference": "TRUE_NORTH"
+        }
+      },
+      "output": {
+        "captured_at": "2026-10-28T19:01:10.123Z",
+        "latitude": null,
+        "longitude": null,
+        "horizontal_accuracy_m": null,
+        "altitude_m": null,
+        "camera_heading_deg": 359.9,
+        "camera_heading_accuracy_code": 2,
+        "heading_reference": "TRUE_NORTH",
+        "location_source": null,
+        "heading_source": "DEVICE_TRUE_HEADING",
+        "provenance": null
+      }
+    },
+    {
+      "input": {
+        "position": {
+          "coords": {
+            "latitude": 37.7312,
+            "longitude": -122.1975,
+            "accuracy": -1,
+            "altitude": null
+          },
+          "timestamp": 0
+        },
+        "direction": null
+      },
+      "output": {
+        "captured_at": "2026-10-28T19:01:10.123Z",
+        "latitude": 37.7312,
+        "longitude": -122.1975,
+        "horizontal_accuracy_m": null,
+        "altitude_m": null,
+        "camera_heading_deg": null,
+        "camera_heading_accuracy_code": null,
+        "heading_reference": null,
+        "location_source": "DEVICE_AT_CAPTURE",
+        "heading_source": null,
+        "provenance": null
+      }
+    },
+    {
+      "input": {
+        "position": {
+          "coords": {
+            "latitude": 95,
+            "longitude": 10,
+            "accuracy": 5,
+            "altitude": null
+          },
+          "timestamp": 0
+        },
+        "direction": null
+      },
+      "output": null
+    },
+    {
+      "input": {
+        "position": null,
+        "direction": null
+      },
+      "output": null
+    }
+  ],
+  "exifs": [
+    {
+      "exif": {
+        "GPSLatitude": 37.7312,
+        "GPSLongitude": -122.1975,
+        "GPSHPositioningError": 6,
+        "GPSAltitude": 14,
+        "GPSImgDirection": 370,
+        "GPSImgDirectionRef": "T",
+        "DateTimeOriginal": "2026:10:28 09:15:00"
+      },
+      "output": {
+        "captured_at": "2026-10-28T09:15:00",
+        "latitude": 37.7312,
+        "longitude": -122.1975,
+        "horizontal_accuracy_m": 6,
+        "altitude_m": 14,
+        "camera_heading_deg": 10,
+        "camera_heading_accuracy_code": null,
+        "heading_reference": "TRUE_NORTH",
+        "location_source": "EXIF_GPS",
+        "heading_source": "EXIF_GPS_IMG_DIRECTION",
+        "provenance": {
+          "asset_id": "asset-1",
+          "exif_tags_present": [
+            "GPSLatitude",
+            "GPSLongitude",
+            "GPSHPositioningError",
+            "GPSAltitude",
+            "GPSImgDirection",
+            "GPSImgDirectionRef",
+            "DateTimeOriginal"
+          ]
+        }
+      }
+    },
+    {
+      "exif": {
+        "GPSLatitude": 37.7312,
+        "GPSLatitudeRef": "N",
+        "GPSLongitude": 122.1975,
+        "GPSLongitudeRef": "W",
+        "GPSImgDirection": -20,
+        "GPSImgDirectionRef": "M"
+      },
+      "output": {
+        "captured_at": null,
+        "latitude": 37.7312,
+        "longitude": -122.1975,
+        "horizontal_accuracy_m": null,
+        "altitude_m": null,
+        "camera_heading_deg": 340,
+        "camera_heading_accuracy_code": null,
+        "heading_reference": "MAGNETIC_NORTH",
+        "location_source": "EXIF_GPS",
+        "heading_source": "EXIF_GPS_IMG_DIRECTION",
+        "provenance": {
+          "asset_id": "asset-1",
+          "exif_tags_present": [
+            "GPSLatitude",
+            "GPSLatitudeRef",
+            "GPSLongitude",
+            "GPSLongitudeRef",
+            "GPSImgDirection",
+            "GPSImgDirectionRef"
+          ]
+        }
+      }
+    },
+    {
+      "exif": {
+        "GPSLatitude": [
+          33,
+          51,
+          54.5
+        ],
+        "GPSLatitudeRef": "S",
+        "GPSLongitude": [
+          151,
+          12,
+          36
+        ],
+        "GPSLongitudeRef": "E",
+        "GPSHPositioningError": -3,
+        "GPSImgDirectionRef": "Q",
+        "DateTime": "2026:01:02 03:04:05"
+      },
+      "output": {
+        "captured_at": "2026-01-02T03:04:05",
+        "latitude": -33.86513888888889,
+        "longitude": 151.20999999999998,
+        "horizontal_accuracy_m": null,
+        "altitude_m": null,
+        "camera_heading_deg": null,
+        "camera_heading_accuracy_code": null,
+        "heading_reference": null,
+        "location_source": "EXIF_GPS",
+        "heading_source": null,
+        "provenance": {
+          "asset_id": "asset-1",
+          "exif_tags_present": [
+            "GPSLatitude",
+            "GPSLatitudeRef",
+            "GPSLongitude",
+            "GPSLongitudeRef",
+            "GPSHPositioningError",
+            "GPSImgDirectionRef"
+          ]
+        }
+      }
+    },
+    {
+      "exif": {
+        "GPSLatitude": 120,
+        "GPSLongitude": 10,
+        "GPSImgDirection": 45,
+        "GPSImgDirectionRef": ""
+      },
+      "output": {
+        "captured_at": null,
+        "latitude": null,
+        "longitude": null,
+        "horizontal_accuracy_m": null,
+        "altitude_m": null,
+        "camera_heading_deg": 45,
+        "camera_heading_accuracy_code": null,
+        "heading_reference": "UNKNOWN",
+        "location_source": null,
+        "heading_source": "EXIF_GPS_IMG_DIRECTION",
+        "provenance": {
+          "asset_id": "asset-1",
+          "exif_tags_present": [
+            "GPSLatitude",
+            "GPSLongitude",
+            "GPSImgDirection",
+            "GPSImgDirectionRef"
+          ]
+        }
+      }
+    },
+    {
+      "exif": {
+        "DateTimeOriginal": "28/10/2026"
+      },
+      "output": {
+        "captured_at": null,
+        "latitude": null,
+        "longitude": null,
+        "horizontal_accuracy_m": null,
+        "altitude_m": null,
+        "camera_heading_deg": null,
+        "camera_heading_accuracy_code": null,
+        "heading_reference": null,
+        "location_source": null,
+        "heading_source": null,
+        "provenance": {
+          "asset_id": "asset-1",
+          "exif_tags_present": [
+            "DateTimeOriginal"
+          ]
+        }
+      }
+    },
+    {
+      "exif": {},
+      "output": null
+    }
+  ],
+  "merges": [
+    {
+      "primary": {
+        "captured_at": "2026-10-28T19:01:10.123Z",
+        "latitude": null,
+        "longitude": null,
+        "horizontal_accuracy_m": null,
+        "altitude_m": null,
+        "camera_heading_deg": 359.9,
+        "camera_heading_accuracy_code": 2,
+        "heading_reference": "TRUE_NORTH",
+        "location_source": null,
+        "heading_source": "DEVICE_TRUE_HEADING",
+        "provenance": null
+      },
+      "fallback": {
+        "captured_at": "2026-10-28T09:15:00",
+        "latitude": 37.7312,
+        "longitude": -122.1975,
+        "horizontal_accuracy_m": 6,
+        "altitude_m": 14,
+        "camera_heading_deg": 10,
+        "camera_heading_accuracy_code": null,
+        "heading_reference": "TRUE_NORTH",
+        "location_source": "EXIF_GPS",
+        "heading_source": "EXIF_GPS_IMG_DIRECTION",
+        "provenance": {
+          "asset_id": "asset-1",
+          "exif_tags_present": [
+            "GPSLatitude",
+            "GPSLongitude",
+            "GPSHPositioningError",
+            "GPSAltitude",
+            "GPSImgDirection",
+            "GPSImgDirectionRef",
+            "DateTimeOriginal"
+          ]
+        }
+      },
+      "output": {
+        "captured_at": "2026-10-28T19:01:10.123Z",
+        "latitude": 37.7312,
+        "longitude": -122.1975,
+        "horizontal_accuracy_m": 6,
+        "altitude_m": 14,
+        "camera_heading_deg": 359.9,
+        "camera_heading_accuracy_code": 2,
+        "heading_reference": "TRUE_NORTH",
+        "location_source": "EXIF_GPS",
+        "heading_source": "DEVICE_TRUE_HEADING",
+        "provenance": {
+          "asset_id": "asset-1",
+          "exif_tags_present": [
+            "GPSLatitude",
+            "GPSLongitude",
+            "GPSHPositioningError",
+            "GPSAltitude",
+            "GPSImgDirection",
+            "GPSImgDirectionRef",
+            "DateTimeOriginal"
+          ]
+        }
+      }
+    },
+    {
+      "primary": {
+        "captured_at": "2026-10-28T19:01:10.123Z",
+        "latitude": 37.7312,
+        "longitude": -122.1975,
+        "horizontal_accuracy_m": 4.2,
+        "altitude_m": 12.5,
+        "camera_heading_deg": 123.39999999999998,
+        "camera_heading_accuracy_code": 3,
+        "heading_reference": "TRUE_NORTH",
+        "location_source": "DEVICE_AT_CAPTURE",
+        "heading_source": "DEVICE_TRUE_HEADING",
+        "provenance": null
+      },
+      "fallback": {
+        "captured_at": null,
+        "latitude": 37.7312,
+        "longitude": -122.1975,
+        "horizontal_accuracy_m": null,
+        "altitude_m": null,
+        "camera_heading_deg": 340,
+        "camera_heading_accuracy_code": null,
+        "heading_reference": "MAGNETIC_NORTH",
+        "location_source": "EXIF_GPS",
+        "heading_source": "EXIF_GPS_IMG_DIRECTION",
+        "provenance": {
+          "asset_id": "asset-1",
+          "exif_tags_present": [
+            "GPSLatitude",
+            "GPSLatitudeRef",
+            "GPSLongitude",
+            "GPSLongitudeRef",
+            "GPSImgDirection",
+            "GPSImgDirectionRef"
+          ]
+        }
+      },
+      "output": {
+        "captured_at": "2026-10-28T19:01:10.123Z",
+        "latitude": 37.7312,
+        "longitude": -122.1975,
+        "horizontal_accuracy_m": 4.2,
+        "altitude_m": 12.5,
+        "camera_heading_deg": 123.39999999999998,
+        "camera_heading_accuracy_code": 3,
+        "heading_reference": "TRUE_NORTH",
+        "location_source": "DEVICE_AT_CAPTURE",
+        "heading_source": "DEVICE_TRUE_HEADING",
+        "provenance": {
+          "asset_id": "asset-1",
+          "exif_tags_present": [
+            "GPSLatitude",
+            "GPSLatitudeRef",
+            "GPSLongitude",
+            "GPSLongitudeRef",
+            "GPSImgDirection",
+            "GPSImgDirectionRef"
+          ]
+        }
+      }
+    },
+    {
+      "primary": null,
+      "fallback": {
+        "captured_at": "2026-10-28T09:15:00",
+        "latitude": 37.7312,
+        "longitude": -122.1975,
+        "horizontal_accuracy_m": 6,
+        "altitude_m": 14,
+        "camera_heading_deg": 10,
+        "camera_heading_accuracy_code": null,
+        "heading_reference": "TRUE_NORTH",
+        "location_source": "EXIF_GPS",
+        "heading_source": "EXIF_GPS_IMG_DIRECTION",
+        "provenance": {
+          "asset_id": "asset-1",
+          "exif_tags_present": [
+            "GPSLatitude",
+            "GPSLongitude",
+            "GPSHPositioningError",
+            "GPSAltitude",
+            "GPSImgDirection",
+            "GPSImgDirectionRef",
+            "DateTimeOriginal"
+          ]
+        }
+      },
+      "output": {
+        "captured_at": "2026-10-28T09:15:00",
+        "latitude": 37.7312,
+        "longitude": -122.1975,
+        "horizontal_accuracy_m": 6,
+        "altitude_m": 14,
+        "camera_heading_deg": 10,
+        "camera_heading_accuracy_code": null,
+        "heading_reference": "TRUE_NORTH",
+        "location_source": "EXIF_GPS",
+        "heading_source": "EXIF_GPS_IMG_DIRECTION",
+        "provenance": {
+          "asset_id": "asset-1",
+          "exif_tags_present": [
+            "GPSLatitude",
+            "GPSLongitude",
+            "GPSHPositioningError",
+            "GPSAltitude",
+            "GPSImgDirection",
+            "GPSImgDirectionRef",
+            "DateTimeOriginal"
+          ]
+        }
+      }
+    },
+    {
+      "primary": {
+        "captured_at": "2026-10-28T19:01:10.123Z",
+        "latitude": 37.7312,
+        "longitude": -122.1975,
+        "horizontal_accuracy_m": 4.2,
+        "altitude_m": 12.5,
+        "camera_heading_deg": 123.39999999999998,
+        "camera_heading_accuracy_code": 3,
+        "heading_reference": "TRUE_NORTH",
+        "location_source": "DEVICE_AT_CAPTURE",
+        "heading_source": "DEVICE_TRUE_HEADING",
+        "provenance": null
+      },
+      "fallback": null,
+      "output": {
+        "captured_at": "2026-10-28T19:01:10.123Z",
+        "latitude": 37.7312,
+        "longitude": -122.1975,
+        "horizontal_accuracy_m": 4.2,
+        "altitude_m": 12.5,
+        "camera_heading_deg": 123.39999999999998,
+        "camera_heading_accuracy_code": 3,
+        "heading_reference": "TRUE_NORTH",
+        "location_source": "DEVICE_AT_CAPTURE",
+        "heading_source": "DEVICE_TRUE_HEADING",
+        "provenance": null
+      }
+    }
+  ],
+  "headings": [
+    {
+      "input": 0,
+      "output": 0
+    },
+    {
+      "input": 359.999,
+      "output": 359.999
+    },
+    {
+      "input": 360,
+      "output": 0
+    },
+    {
+      "input": 725,
+      "output": 5
+    },
+    {
+      "input": -10,
+      "output": 350
+    },
+    {
+      "input": -370,
+      "output": 350
+    },
+    {
+      "input": "abc",
+      "output": null
+    },
+    {
+      "input": null,
+      "output": null
+    }
+  ]
+}

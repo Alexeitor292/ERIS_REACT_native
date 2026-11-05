@@ -7,7 +7,7 @@ Domain and technical terms used in ERIS, its code and these documents.
 | Term | Meaning |
 | --- | --- |
 | **Caltrans** | California Department of Transportation. |
-| **District** | One of Caltrans's 12 regional districts (D01–D12). Coordinators cover districts; offices serve districts. |
+| **District** | One of Caltrans's 12 regional districts (D01–D12). Each has its own maintenance workflow; offices serve districts. |
 | **County** | Three-letter county code used in postmiles (for example `ALA`, `PLA`). |
 | **Route** | State highway route number, stored as three digits (`080`, `005`). |
 | **Postmile (PM)** | Caltrans's linear reference along a route within a county, with optional prefix (for example `R` realigned) and suffix (`L`/`R` for divided lanes): `R12.35L`. ERIS stores two decimals. |
@@ -25,7 +25,7 @@ Domain and technical terms used in ERIS, its code and these documents.
 | --- | --- |
 | **Incident** (report) | A field report. Provisional until triage; enters the record with an ERIS number when an assessment is required. |
 | **ERIS number** | The permanent incident identifier assigned at triage. Never changes. |
-| **Triage** | The coordinator's decision on a new report: assessment required, not required, duplicate, or needs reporter information. |
+| **Triage** | The decision on a new report in a district with no workflow, made by an administrator: assessment required, not required, duplicate, or needs reporter information. |
 | **Incident Group** (event group) | Reports caused by one event (for example a storm on one route). The older API calls them *projects*. |
 | **Mission Center** | The map of every Incident Group with reports in the record. |
 | **Assessment** | The GeoTech work item for an incident: routed, assigned, authored, reviewed. States in [workflows](../architecture/workflows.md#4-assessments). |
@@ -42,8 +42,7 @@ Domain and technical terms used in ERIS, its code and these documents.
 
 | Role code | Name | In short |
 | --- | --- | --- |
-| `MAINTENANCE_CREW` | Maintenance Crew | Reports incidents from the field |
-| `MAINTENANCE_COORDINATOR` | Maintenance Coordinator | Triages reports for the districts they cover |
+| `MAINTENANCE` | Maintenance | Their own reports, plus whatever their part in a district's workflow gives them |
 | `OFFICE_CHIEF` | Office Chief | Routes and (on the Senior Specialist route) reviews assessments |
 | `BRANCH_CHIEF` | Branch Chief | Assigns Staff and reviews branch-route assessments |
 | `STAFF` | Staff | Authors technical forms |

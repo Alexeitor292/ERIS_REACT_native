@@ -118,12 +118,18 @@ def test_staff_to_a_specialist_needs_the_branch_chief_and_tells_the_office_chief
     assert _can_edit(client_db, form, org["spec_w"])
 
 
-def test_specialist_to_specialist_goes_through_and_both_office_chiefs_are_told(client_db, org):
+def test_specialists_in_two_offices_need_both_office_chiefs_to_approve(client_db, org):
     form = _form(client_db, org["spec_w"])
     share = _share(client_db, form, org["spec_w"], org["spec_n"])
-    assert share["status"] == "ACTIVE"
+    assert share["status"] == "PENDING"
+    assert not _can_edit(client_db, form, org["spec_n"])
+    west = _waiting(client_db, org["ochief_w"], share["id"])
+    north = _waiting(client_db, org["ochief_n"], share["id"])
+    assert west["kind"] == "APPROVAL" and north["kind"] == "APPROVAL"
+    _decide(client_db, org["ochief_w"], west, "APPROVE")
+    assert not _can_edit(client_db, form, org["spec_n"]), "not until both approve"
+    _decide(client_db, org["ochief_n"], north, "APPROVE")
     assert _can_edit(client_db, form, org["spec_n"])
-    assert _waiting(client_db, org["ochief_w"], share["id"]) and _waiting(client_db, org["ochief_n"], share["id"])
 
 
 def test_the_owner_can_withdraw_a_request_and_the_form_lists_where_each_stands(client_db, org):

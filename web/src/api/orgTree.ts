@@ -69,19 +69,6 @@ export type PersonHit = {
   is_admin: boolean;
 };
 
-export type MaintenanceDistrict = {
-  workflow_configured?: boolean;
-  district: string;
-  coordinators: Array<{ id: number; full_name: string; email: string; is_primary: boolean }>;
-  crew: Array<{ id: number; full_name: string; email: string }>;
-  /** This district's coordinators may change its crew; administrators may change everything. */
-  can_manage_crew?: boolean;
-  /** Office chiefs of an office serving this district, and administrators, may change its coordinators. */
-  can_manage_coordinators?: boolean;
-};
-
-export type MaintenancePayload = { districts: MaintenanceDistrict[] };
-
 export type PersonDetails = {
   user_id: number;
   classification_code: string | null;
@@ -113,14 +100,6 @@ export const removeFromTree = (userId: number) => api<TreePayload>(`/org/tree/pe
 export const getDetails = (userId: number) => api<PersonDetails>(`/org/tree/people/${userId}/details`);
 export const putDetails = (userId: number, body: Partial<Omit<PersonDetails, "user_id">>) =>
   api<PersonDetails>(`/org/tree/people/${userId}/details`, { method: "PUT", body: JSON.stringify(body) });
-
-export const getMaintenance = () => api<MaintenancePayload>("/org/maintenance");
-export const addMaintenance = (district: string, kind: "coordinators" | "crew", userId: number) =>
-  post<MaintenancePayload>(`/org/maintenance/${district}/${kind}`, { user_id: userId });
-export const removeMaintenance = (district: string, kind: "coordinators" | "crew", userId: number) =>
-  api<MaintenancePayload>(`/org/maintenance/${district}/${kind}/${userId}`, { method: "DELETE" });
-export const makePrimaryCoordinator = (district: string, userId: number) =>
-  post<MaintenancePayload>(`/org/maintenance/${district}/coordinators/${userId}/primary`);
 
 export const setAdmin = (userId: number, isAdmin: boolean) =>
   api<{ user_id: number; roles: string[] }>(`/admin/users/${userId}/admin`, { method: "PUT", body: JSON.stringify({ is_admin: isAdmin }) });

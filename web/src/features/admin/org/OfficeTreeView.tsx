@@ -3,6 +3,7 @@ import { Crown, Leaf, MoreHorizontal, Pencil, Plus, TriangleAlert, Users } from 
 
 
 import { POSITION_LABEL, type OfficeTree, type TreeBranch, type TreePerson, type TreePosition } from "../../../api/orgTree";
+import PanCanvas from "../../../ui/PanCanvas";
 
 export type AddKind = "chief" | "specialist" | "branchChief" | "staff";
 export type AddRequest = { kind: AddKind; officeId: number; branchId?: number; title: string; target: string; branchChiefOnly: boolean };
@@ -69,12 +70,6 @@ export default function OfficeTreeView({
 }) {
   const { office } = tree;
   const officeName = office.short_name || office.name;
-  // A wide office opens scrolled to its middle, so its chief is in view.
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (el && el.scrollWidth > el.clientWidth) el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2;
-  }, [office.id]);
   // An office holds nobody until it has an office chief (it cannot exist without one).
   const open = tree.chiefs.length > 0;
   const manage = tree.can_manage && open;
@@ -114,8 +109,8 @@ export default function OfficeTreeView({
         ) : null}
       </header>
 
-      <div ref={scrollRef} className="org-tree overflow-x-auto">
-        <div className="mx-auto flex w-max min-w-full flex-col items-center px-6 pb-8 pt-6">
+      <PanCanvas label={`${office.name} organization tree`} className="h-[min(72vh,48rem)] min-h-[26rem] rounded-b-2xl">
+        <div className="org-tree flex w-max flex-col items-center px-6 pb-8 pt-6">
           {/* The top of the tree */}
           <div className="flex flex-wrap items-start justify-center gap-3">
             {tree.chiefs.map((chief) => (
@@ -184,7 +179,7 @@ export default function OfficeTreeView({
             ) : null}
           </div>
         </div>
-      </div>
+      </PanCanvas>
     </section>
   );
 }

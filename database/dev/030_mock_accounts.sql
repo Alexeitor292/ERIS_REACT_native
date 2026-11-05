@@ -53,9 +53,9 @@ FROM users u
 JOIN roles r
 WHERE
   (u.email='mock.admin@dot.ca.gov' AND r.name='ADMIN') OR
-  (u.email='mock.maintenance.crew@dot.ca.gov' AND r.name='MAINTENANCE_CREW') OR
-  (u.email='mock.coordinator.d01@dot.ca.gov' AND r.name='MAINTENANCE_COORDINATOR') OR
-  (u.email='mock.coordinator.d04@dot.ca.gov' AND r.name='MAINTENANCE_COORDINATOR') OR
+  (u.email='mock.maintenance.crew@dot.ca.gov' AND r.name='MAINTENANCE') OR
+  (u.email='mock.coordinator.d01@dot.ca.gov' AND r.name='MAINTENANCE') OR
+  (u.email='mock.coordinator.d04@dot.ca.gov' AND r.name='MAINTENANCE') OR
   (u.email='mock.office.chief@dot.ca.gov' AND r.name='OFFICE_CHIEF') OR
   (u.email='mock.branch.chief@dot.ca.gov' AND r.name='BRANCH_CHIEF') OR
   (u.email='mock.senior.specialist@dot.ca.gov' AND r.name='SENIOR_SPECIALIST') OR

@@ -6,10 +6,11 @@ When a slope fails, a rock falls or an embankment washes out on a California
 state highway, ERIS carries the case from the first field report to an approved
 geotechnical assessment:
 
-1. A **Maintenance Crew** member reports the incident from the field, with
+1. Someone in **Maintenance** reports the incident from the field, with
    location, photos and a description.
-2. The district's **Maintenance Coordinator** triages it: assessment needed,
-   not needed, duplicate, or more information required.
+2. The **district's workflow** takes it through its reviews to a final decision:
+   Maintenance handles it, or it goes to GeoTech. A district with no workflow yet
+   has an administrator decide.
 3. If needed, an **assessment** is routed to the GeoTech office serving the
    district. The **Office Chief** routes it to a **Branch Chief** (who assigns a
    **Staff** member) or directly to a **Senior Specialist**.
@@ -25,8 +26,8 @@ notification feed (with push on the iPhone app).
 
 ```mermaid
 flowchart LR
-    crew(["Maintenance Crew"])
-    coord(["Maintenance Coordinator"])
+    crew(["Maintenance reporter"])
+    coord(["Maintenance reviewer<br/>or decider"])
     oc(["Office Chief"])
     bc(["Branch Chief"])
     staff(["Staff / Senior Specialist"])
@@ -113,7 +114,7 @@ mindmap
       Photos with position and heading
       Offline drafts on the phone
     Triage and groups
-      Coordinator decisions
+      District workflow decisions
       Incident Groups and ERIS numbers
       Mission Center map
     Assessments

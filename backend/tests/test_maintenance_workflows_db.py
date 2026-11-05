@@ -27,7 +27,7 @@ def test_real_district_workflow_to_maintenance_and_geotech():
         district = next((f"{n:02d}" for n in range(1, 13) if f"{n:02d}" not in occupied), None)
         if not district:
             pytest.skip("Integration fixture needs a district without a configured workflow")
-        for i, role in enumerate(["ADMIN", "GUEST", "GUEST", "GUEST", "GUEST", "GUEST", "STAFF", "MAINTENANCE_COORDINATOR"]):
+        for i, role in enumerate(["ADMIN", "GUEST", "GUEST", "GUEST", "GUEST", "GUEST", "STAFF", "MAINTENANCE"]):
             result = db.execute(text("INSERT INTO users (email, full_name, is_active) VALUES (:e, :n, 1)"),
                                 {"e": f"workflow-{suffix}-{i}@example.test", "n": f"Workflow test {i}"})
             uid = int(result.lastrowid)
@@ -75,7 +75,7 @@ def test_real_district_workflow_to_maintenance_and_geotech():
                 iid = response.json()["incident"]["id"]; incident_ids.append(iid)
                 assert call("GET", f"/incidents/{iid}", 5).status_code == 200  # Notify-only may read.
                 assert call("GET", f"/incidents/{iid}", 6).status_code == 403  # Unassigned Staff may not.
-                assert call("POST", f"/incidents/{iid}/triage", 7, {"disposition": "NO_ASSESSMENT_REQUIRED"}).status_code == 409
+                assert call("POST", f"/incidents/{iid}/triage", 7, {"disposition": "NO_ASSESSMENT_REQUIRED"}).status_code == 403
                 initial = call("GET", f"/maintenance-work/incidents/{iid}", 2).json()
                 version = initial["version"]
                 response = call("POST", f"/maintenance-work/incidents/{iid}/actions", 2,

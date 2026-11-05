@@ -23,14 +23,14 @@ from ..roles import (
     OFFICE_CHIEF,
     SENIOR_SPECIALIST,
     GISA_AUTHOR_ROLES,
-    MAINTENANCE_COORDINATOR,
-    MAINTENANCE_CREW,
+    MAINTENANCE,
     MAINTENANCE_REPORTING_ROLES,
     OPERATIONAL_ROLES,
     has_role,
     is_maintenance_only,
     is_public_only,
 )
+from ..services import district_contact
 from ..services import org_directory
 from ..services import maintenance_workflows as mw
 from ..services.incident_name import incident_name
@@ -478,10 +478,10 @@ def _location_timeline(
 
 # Routing lookups match the canonical role name AND its legacy alias. Matching
 # only the legacy name (the pre-v2 behaviour) made a user who holds just
-# MAINTENANCE_COORDINATOR or OFFICE_CHIEF invisible to routing and to
+# MAINTENANCE or OFFICE_CHIEF invisible to routing and to
 # every notification it drives. SENIOR_ENGINEER has no legacy alias.
 _ROUTING_ROLE_NAMES: dict[str, list[str]] = {
-    "DISTRICT_COORDINATOR": [MAINTENANCE_COORDINATOR],
+    "DISTRICT_COORDINATOR": [MAINTENANCE],
     "OFFICE_CHIEF": [OFFICE_CHIEF],
     "BRANCH_CHIEF": [BRANCH_CHIEF],
     "SENIOR_ENGINEER": [SENIOR_SPECIALIST],
@@ -528,19 +528,9 @@ def _routing_users_for(
         if not normalized_office:
             return []
         params["office_code"] = normalized_office
-        office_sql = org_directory.USER_OFFICE_CODE_SQL
-        if assignment_key in {"BRANCH_CHIEF", "SENIOR_ENGINEER"}:
-            # Accounts created before office scoping have no office at all.
-            # Excluding those otherwise-valid users leaves the office chief's
-            # routing pickers empty and strands the assessment, so a named
-            # branch chief or senior specialist with NO office is admitted as a
-            # compatibility fallback (PR #125); one scoped to another office is
-            # not. Their authority stays limited to the assessment that names them.
-            where_parts.append(f"({office_sql} = :office_code OR {office_sql} = '')")
-        else:
-            # Office chiefs own every assessment in their office, so unlike a
-            # named branch/senior assignee they must always be explicitly scoped.
-            where_parts.append(f"{office_sql} = :office_code")
+        # Only people of this office: a role follows from a place in its tree, so
+        # nobody who should be offered here has no office (owner, 2026-11-03).
+        where_parts.append(f"{org_directory.USER_OFFICE_CODE_SQL} = :office_code")
 
     rows = db.execute(
         text(
@@ -1012,7 +1002,7 @@ def _ensure_incident_scope_access(user: dict, incident_row: dict, *, db: Session
     """Narrow incident detail to the caller's district or office.
 
     The role tests are CANONICAL (``has_role``), not the raw legacy
-    strings they used to be. An account holding only ``MAINTENANCE_COORDINATOR``,
+    strings they used to be. An account holding only ``MAINTENANCE``,
     ``OFFICE_CHIEF`` or ``BRANCH_CHIEF`` — which is what the org
     model and every new deployment issue — matched none of the old strings and
     therefore got NO narrowing at all: the reverse of the intended bug, an
@@ -1031,8 +1021,6 @@ def _ensure_incident_scope_access(user: dict, incident_row: dict, *, db: Session
         if int(incident_row.get("reporter_user_id") or 0) != int(user["id"]):
             raise HTTPException(status_code=403, detail="You can only view your own incident reports")
         return
-    if has_role(user, MAINTENANCE_COORDINATOR):
-        _ensure_incident_district_access(user, incident_row.get("district"), db=db)
     if has_role(user, OFFICE_CHIEF) or has_role(user, BRANCH_CHIEF):
         office_code = incident_row.get("office_code")
         if not office_code and db is not None:
@@ -1222,7 +1210,7 @@ def _mobile_scope_filters(db: Session, user: dict) -> tuple[list[str], dict[str,
 
     Every branch tests CANONICAL role names now. Four of them — coordinator,
     office chief, branch chief and maintenance reporter — used to test the legacy
-    strings only, so an account holding just ``MAINTENANCE_COORDINATOR`` matched
+    strings only, so an account holding just ``MAINTENANCE`` matched
     nothing, fell through to ``['1=0']`` below and saw an EMPTY feed. That is a
     regression blocker the moment org accounts are seeded canonically, and it is
     fixed here rather than on the client (design §9.3, B20).
@@ -1238,15 +1226,6 @@ def _mobile_scope_filters(db: Session, user: dict) -> tuple[list[str], dict[str,
     role_filters: list[str] = []
     params: dict[str, object] = {"mobile_uid": uid}
     org = org_directory.resolve_user_org(db, user)
-
-    if has_role(user, MAINTENANCE_COORDINATOR):
-        districts = _caller_districts(user, db)
-        if districts:
-            role_filters.append(
-                "(i.current_stage = 'COORDINATOR_REVIEW' AND "
-                + _district_filter("i.district", districts, params, "coord_district_")
-                + ")"
-            )
 
     if has_role(user, OFFICE_CHIEF):
         office_code = normalize_office_code(org.get("office_code"))
@@ -1274,7 +1253,7 @@ def _mobile_scope_filters(db: Session, user: dict) -> tuple[list[str], dict[str,
             "EXISTS (SELECT 1 FROM incident_assignments ia WHERE ia.incident_id = i.id AND ia.assignment_stage = 'ENGINEER' AND ia.is_active = 1 AND ia.assignee_user_id = :mobile_uid)"
         )
 
-    if has_role(user, MAINTENANCE_CREW):
+    if has_role(user, MAINTENANCE):
         role_filters.append("i.reporter_user_id = :mobile_uid")
 
     if not role_filters:
@@ -1438,6 +1417,7 @@ def _ensure_linked_submission(
             ),
             {"sid": int(existing), "uid": assignee_user_id, "granted_by": actor_user_id},
         )
+        district_contact.prefill_form(db, submission_id=int(existing), incident_id=int(incident_row["id"]))
         return int(existing)
 
     return _create_linked_submission(
@@ -1584,6 +1564,7 @@ def _create_linked_submission(
             ),
             {"sid": submission_id, "uid": reporter_uid, "granted_by": actor_user_id},
         )
+    district_contact.prefill_form(db, submission_id=submission_id, incident_id=int(incident_row["id"]))
     return submission_id
 
 
@@ -1742,24 +1723,16 @@ def create_incident(
             },
         )
         new_id = int(db.execute(text("SELECT LAST_INSERT_ID()")).scalar())
-        coordinator_ids = [] if workflow else _routing_users_for(
-            db=db,
-            assignment_type="DISTRICT_COORDINATOR",
-            district=district_code,
-        )
-        if coordinator_ids:
-            _set_stage_assignment(
-                db=db,
-                incident_id=new_id,
-                assignee_user_id=coordinator_ids[0],
-                assigned_by_user_id=int(user["id"]),
-                assignment_mode="ASSIGN",
-                assignment_stage="COORDINATOR",
-            )
+        # With no workflow in the district, an administrator decides the report: tell them.
+        reviewers = [] if workflow else [int(uid) for uid in db.execute(text(
+            "SELECT DISTINCT u.id FROM users u JOIN user_roles ur ON ur.user_id = u.id "
+            "JOIN roles r ON r.id = ur.role_id WHERE r.name = 'ADMIN' AND u.is_active = 1"
+        )).scalars()]
+        if reviewers:
             _queue_incident_notifications(
                 db=db,
                 incident_id=new_id,
-                recipient_user_ids=coordinator_ids,
+                recipient_user_ids=reviewers,
                 template_code="INCIDENT_COORDINATOR_REVIEW",
                 payload={"incident_id": new_id, "district": district_code, "office_code": office_code},
             )
@@ -1778,7 +1751,7 @@ def list_incident_location_candidates(
     incident_id: int = Path(..., ge=1),
     limit: int = Query(default=8, ge=1, le=20),
     db: Session = Depends(get_db),
-    user=Depends(require_roles([MAINTENANCE_COORDINATOR, ADMIN])),
+    user=Depends(require_roles([ADMIN])),
 ):
     mw.legacy_action(db, incident_id)
     incident = _incident_with_assignment(db, incident_id)
@@ -1814,7 +1787,7 @@ def get_incident_location_timeline(
     # endpoint returns every incident at a site regardless of state, so the role
     # alone would hand a viewer exactly the in-flight work the rest of §4.5
     # hides (design §4.5).
-    user=Depends(require_roles([MAINTENANCE_COORDINATOR, OFFICE_CHIEF, BRANCH_CHIEF, GUEST, ADMIN])),
+    user=Depends(require_roles([OFFICE_CHIEF, BRANCH_CHIEF, GUEST, ADMIN])),
 ):
     return _location_timeline(
         db=db,
@@ -1829,7 +1802,7 @@ def link_incident_location(
     payload: IncidentLocationLinkRequest,
     incident_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(require_roles([MAINTENANCE_COORDINATOR, ADMIN])),
+    user=Depends(require_roles([ADMIN])),
 ):
     mw.legacy_action(db, incident_id)
     incident = _incident_with_assignment(db, incident_id)
@@ -1915,7 +1888,7 @@ def coordinator_request_revision(
     payload: IncidentRequestRevision,
     incident_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(require_roles([MAINTENANCE_COORDINATOR, ADMIN])),
+    user=Depends(require_roles([ADMIN])),
 ):
     mw.legacy_action(db, incident_id)
     incident = _incident_with_assignment(db, incident_id)
@@ -2166,10 +2139,7 @@ def list_incidents(
         where_parts.append("NOT EXISTS (SELECT 1 FROM maintenance_workflow_runs mr WHERE mr.incident_id = i.id)")
         where_parts.append("i.current_stage = 'COORDINATOR_REVIEW' AND i.status <> 'RESOLVED'")
         if "ADMIN" not in set(user.get("roles") or []):
-            if has_role(user, MAINTENANCE_COORDINATOR):
-                where_parts.append(_district_filter("i.district", _caller_districts(user, db), params, "triage_district_"))
-            else:
-                where_parts.append("1=0")
+            where_parts.append("1=0")
     elif work_queue:
         raise HTTPException(status_code=400, detail="Invalid queue filter")
     where_sql = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
@@ -2323,7 +2293,7 @@ def coordinator_forward_incident(
     payload: IncidentCoordinatorForwardRequest,
     incident_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(require_roles([MAINTENANCE_COORDINATOR, ADMIN])),
+    user=Depends(require_roles([ADMIN])),
 ):
     mw.legacy_action(db, incident_id)
     incident = _incident_with_assignment(db, incident_id)

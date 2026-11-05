@@ -119,7 +119,7 @@ are the reference.
 | Lookups | `GET /gisa/lookups`, `GET /arcgis/runtime-config` |
 | Incidents | `GET/POST /incidents`, `GET/PATCH /incidents/{id}`, `POST /incidents/{id}/attachments` (multipart), `…/assessment`, `…/assign`, `…/unassign`, `…/claim`, `…/triage`, `…/resolve`, `…/branch-chief/assign-engineer`, `…/coordinator/request-revision`, `…/location-candidates`, `…/location-link`, `…/workflow-tree`; `GET /incident-locations/{id}/timeline`; `GET /mission-center/incidents` |
 | Assessments | `GET /assessments`, `GET /assessments/{id}`, `POST /assessments/routing/preview`, `…/{id}/assign-engineer`, `…/branch-options`, `…/delegate-branch`, `…/review`, `…/submit` |
-| Submissions (GISA) | `GET/POST /submissions`, `GET/PATCH /submissions/{id}`, `…/gisa`, `…/gisa/actions`, `…/gisa/incident-types`, `…/gisa/pdf`, `…/geometry`, `…/photo-map`, `…/permissions`, `…/title`, `…/review`, `…/submit`, `…/notify-coordinator`, `POST /submissions/{id}/attachments` (multipart) |
+| Submissions (GISA) | `GET/POST /submissions`, `GET/PATCH /submissions/{id}`, `…/gisa`, `…/gisa/actions`, `…/gisa/incident-types`, `…/geometry`, `…/photo-map`, `…/permissions`, `…/title`, `…/review`, `…/submit`, `…/notify-coordinator`, `POST /submissions/{id}/attachments` (multipart) |
 | Attachments | `GET /attachments/{id}/download-url` (a presigned S3 URL, valid for about 15 minutes: fetch it **without** an `Authorization` header), `POST /attachments/complete` |
 | Offline terrain | `GET /submissions/{id}/gisa/offline-scene-package`, `…/generate`, `…/job`, `…/job/cancel`, `…/job/retry`, `…/download` |
 | Road inventory | `GET /road-inventory/manifest`, `GET /road-inventory/package`, `GET /road-inventory/mobile-package/download` |

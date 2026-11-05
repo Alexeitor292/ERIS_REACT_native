@@ -26,8 +26,6 @@ router = APIRouter(tags=["organization"])
 # Who may reach the tree-editing endpoints; each change is checked against the office or branch.
 TREE_VIEWERS = ["ADMIN", "OFFICE_CHIEF", "BRANCH_CHIEF"]
 ADMIN_ONLY = ["ADMIN"]
-# Who may reach the district-list endpoints; each change is checked against the district.
-LIST_EDITORS = ["ADMIN", "OFFICE_CHIEF", "MAINTENANCE_COORDINATOR"]
 
 
 class PersonIn(BaseModel):
@@ -98,7 +96,7 @@ def get_tree(db: Session = Depends(get_db), actor=Depends(get_current_user)):
 def find_people(
     q: str = Query(default="", max_length=80),
     db: Session = Depends(get_db),
-    _actor=Depends(require_roles(sorted(set(TREE_VIEWERS) | set(LIST_EDITORS)))),
+    _actor=Depends(require_roles(TREE_VIEWERS)),
 ):
     """Registered users to place, with where each one sits today."""
     return {"items": org_tree.search_people(db, q)}
@@ -188,58 +186,6 @@ def put_details(body: DetailsIn, user_id: int = Path(..., ge=1), db: Session = D
     with _writing(db):
         org_tree.update_details(db, actor, user_id=user_id, fields=body.model_dump(exclude_unset=True))
     return org_tree.person_details(db, user_id)
-
-
-# --- maintenance -------------------------------------------------------------
-
-_KINDS = {"coordinators": "COORDINATOR", "crew": "CREW"}
-
-
-def _maintenance_payload(db: Session, actor: dict) -> dict:
-    from sqlalchemy import text
-    configured = set(db.execute(text("SELECT district FROM maintenance_workflows")).scalars())
-    rights = org_tree.maintenance_rights(db, actor)
-    districts = org_tree.maintenance_lists(db)
-    for entry in districts:
-        entry["workflow_configured"] = entry["district"] in configured
-        allowed = rights.get(entry["district"], {"crew": False, "coordinators": False})
-        entry["can_manage_crew"] = allowed["crew"]
-        entry["can_manage_coordinators"] = allowed["coordinators"]
-    return {"districts": districts}
-
-
-def _kind(value: str) -> str:
-    kind = _KINDS.get(value)
-    if not kind:
-        raise HTTPException(status_code=404, detail="Unknown list")
-    return kind
-
-
-@router.get("/org/maintenance")
-def get_maintenance(db: Session = Depends(get_db), actor=Depends(get_current_user)):
-    """Every district's coordinators and crew, for everyone; each district says what this person may change."""
-    return _maintenance_payload(db, actor)
-
-
-@router.post("/org/maintenance/{district}/{kind}")
-def add_maintenance(body: PersonIn, district: str = Path(..., max_length=4), kind: str = Path(...), db: Session = Depends(get_db), actor=Depends(require_roles(LIST_EDITORS))):
-    with _writing(db):
-        org_tree.add_maintenance(db, actor, district=district, user_id=body.user_id, kind=_kind(kind))
-    return _maintenance_payload(db, actor)
-
-
-@router.delete("/org/maintenance/{district}/{kind}/{user_id}")
-def remove_maintenance(district: str = Path(..., max_length=4), kind: str = Path(...), user_id: int = Path(..., ge=1), db: Session = Depends(get_db), actor=Depends(require_roles(LIST_EDITORS))):
-    with _writing(db):
-        org_tree.remove_maintenance(db, actor, district=district, user_id=user_id, kind=_kind(kind))
-    return _maintenance_payload(db, actor)
-
-
-@router.post("/org/maintenance/{district}/coordinators/{user_id}/primary")
-def make_primary(district: str = Path(..., max_length=4), user_id: int = Path(..., ge=1), db: Session = Depends(get_db), actor=Depends(require_roles(LIST_EDITORS))):
-    with _writing(db):
-        org_tree.set_primary_coordinator(db, actor, district=district, user_id=user_id)
-    return _maintenance_payload(db, actor)
 
 
 # --- administrators ----------------------------------------------------------

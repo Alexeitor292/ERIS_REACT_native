@@ -2,23 +2,24 @@
 
 > **Generated** by `scripts/docs/generate_schema_docs.py` from a fully migrated database. Do not edit by hand; CI fails when this file is stale. Column-level detail is in the [schema reference](schema-reference.md).
 
-ERIS has **61 tables** in MariaDB. File bytes (photos, PDFs, terrain packages) are in S3 object storage; tables hold only their bucket and key. One diagram per domain follows; a table from another domain appears with its key only, so the links between domains stay visible.
+ERIS has **66 tables** in MariaDB. File bytes (photos, PDFs, terrain packages) are in S3 object storage; tables hold only their bucket and key. One diagram per domain follows; a table from another domain appears with its key only, so the links between domains stay visible.
 
 ## How the domains connect
 
 ```mermaid
 flowchart LR
     identity_and_access["Identity and access<br/>8 tables"]
-    organization["Organization<br/>9 tables"]
+    organization["Organization<br/>10 tables"]
     incidents["Incidents<br/>8 tables"]
     assessments["Assessments<br/>4 tables"]
-    submissions_gisa["Submissions (GISA)<br/>11 tables"]
+    submissions_gisa["Submissions (GISA)<br/>12 tables"]
     attachments["Attachments<br/>4 tables"]
     notifications["Notifications<br/>3 tables"]
     maintenance_workflows["Maintenance workflows<br/>3 tables"]
     projects["Projects<br/>1 tables"]
     road_inventory["Road inventory<br/>4 tables"]
     terrain_and_offline_scenes["Terrain and offline scenes<br/>6 tables"]
+    other["Other<br/>3 tables"]
     assessments -->|7 FK| identity_and_access
     assessments -->|4 FK| incidents
     assessments -->|2 FK| organization
@@ -26,16 +27,18 @@ flowchart LR
     attachments -->|2 FK| identity_and_access
     attachments -->|1 FK| submissions_gisa
     incidents -->|1 FK| attachments
-    incidents -->|12 FK| identity_and_access
+    incidents -->|13 FK| identity_and_access
     incidents -->|2 FK| road_inventory
     incidents -->|1 FK| submissions_gisa
     maintenance_workflows -->|2 FK| incidents
     notifications -->|4 FK| identity_and_access
     notifications -->|1 FK| incidents
-    organization -->|5 FK| identity_and_access
+    organization -->|7 FK| identity_and_access
+    other -->|7 FK| identity_and_access
+    other -->|1 FK| submissions_gisa
     projects -->|1 FK| identity_and_access
-    submissions_gisa -->|2 FK| attachments
-    submissions_gisa -->|14 FK| identity_and_access
+    submissions_gisa -->|3 FK| attachments
+    submissions_gisa -->|16 FK| identity_and_access
     submissions_gisa -->|1 FK| incidents
     submissions_gisa -->|2 FK| road_inventory
     terrain_and_offline_scenes -->|3 FK| identity_and_access
@@ -48,16 +51,17 @@ An arrow points from the domain holding the foreign key to the domain it referen
 ## Contents
 
 - [Identity and access](#identity-and-access) (8 tables)
-- [Organization](#organization) (9 tables)
+- [Organization](#organization) (10 tables)
 - [Incidents](#incidents) (8 tables)
 - [Assessments](#assessments) (4 tables)
-- [Submissions (GISA)](#submissions-gisa) (11 tables)
+- [Submissions (GISA)](#submissions-gisa) (12 tables)
 - [Attachments](#attachments) (4 tables)
 - [Notifications](#notifications) (3 tables)
 - [Maintenance workflows](#maintenance-workflows) (3 tables)
 - [Projects](#projects) (1 tables)
 - [Road inventory](#road-inventory) (4 tables)
 - [Terrain and offline scenes](#terrain-and-offline-scenes) (6 tables)
+- [Other](#other) (3 tables)
 
 ## Identity and access
 
@@ -218,6 +222,12 @@ erDiagram
         datetime created_at
         datetime updated_at
     }
+    org_district_settings {
+        varchar district PK
+        bigint contact_user_id FK
+        bigint updated_by_user_id FK
+        datetime updated_at
+    }
     org_office_districts {
         bigint id PK
         bigint office_id FK
@@ -276,6 +286,8 @@ erDiagram
     org_offices ||--o{ org_branches : "office_id"
     org_offices ||--o{ org_office_districts : "office_id,org_type"
     users |o--o{ org_branches : "chief_user_id"
+    users |o--o{ org_district_settings : "contact_user_id"
+    users |o--o{ org_district_settings : "updated_by_user_id"
     users |o--o{ org_user_profiles : "supervisor_user_id"
     users ||--o{ org_coordinator_coverage : "user_id"
     users ||--o{ org_district_crew : "user_id"
@@ -400,6 +412,7 @@ erDiagram
         datetime resolved_at
         bigint resolved_by_user_id FK
         text resolution_comment
+        bigint district_contact_user_id FK
         bigint road_inventory_dataset_version_id FK
         bigint road_inventory_segment_id FK
         longtext road_inventory_snapshot_json
@@ -445,6 +458,7 @@ erDiagram
     users |o--o{ event_group_events : "actor_user_id"
     users |o--o{ event_groups : "closed_by_user_id"
     users |o--o{ incidents : "approved_by_user_id"
+    users |o--o{ incidents : "district_contact_user_id"
     users |o--o{ incidents : "location_reviewed_by_user_id"
     users |o--o{ incidents : "resolved_by_user_id"
     users |o--o{ incidents : "triage_decided_by_user_id"
@@ -629,10 +643,6 @@ erDiagram
         integer open_highway_traffic_lanes_count
         longtext pavement_ground_annotation_layout_json
         tinyint pavement_ground_cracks
-        decimal crack_length_ft
-        decimal crack_horizontal_in
-        decimal crack_vertical_in
-        decimal crack_depth_in
         decimal settlement_in
         decimal bulge_in
         tinyint indented_by_rocks
@@ -737,6 +747,32 @@ erDiagram
         varchar action_code PK
         datetime created_at
     }
+    submission_gisa_cracks {
+        bigint id PK
+        bigint submission_id FK
+        char client_uuid UK
+        integer sort_order
+        varchar label
+        decimal latitude
+        decimal longitude
+        varchar location_source
+        longtext geometry_json
+        decimal trend_deg
+        varchar orientation
+        decimal length_ft
+        decimal width_in
+        decimal horizontal_disp_in
+        decimal vertical_disp_in
+        decimal depth_in
+        text notes
+        bigint photo_attachment_id FK
+        longtext annotations_json
+        integer revision
+        bigint created_by_user_id FK
+        bigint updated_by_user_id FK
+        datetime created_at
+        datetime updated_at
+    }
     submission_gisa_incident_types {
         bigint submission_id PK,FK
         varchar incident_type_code PK
@@ -822,6 +858,7 @@ erDiagram
     }
     attachments |o--o{ submission_drone_surveys : "dsm_attachment_id"
     attachments |o--o{ submission_drone_surveys : "ortho_attachment_id"
+    attachments |o--o{ submission_gisa_cracks : "photo_attachment_id"
     incident_locations |o--o{ submission_gisa : "location_id"
     road_inventory_datasets |o--o{ submission_gisa : "road_inventory_dataset_version_id"
     road_segments |o--o{ submission_gisa : "road_inventory_segment_id"
@@ -831,18 +868,21 @@ erDiagram
     submissions ||--o{ submission_editors : "submission_id"
     submissions ||--o{ submission_gisa : "submission_id"
     submissions ||--o{ submission_gisa_actions : "submission_id"
+    submissions ||--o{ submission_gisa_cracks : "submission_id"
     submissions ||--o{ submission_gisa_incident_types : "submission_id"
     submissions ||--o{ submission_presence : "submission_id"
     submissions ||--o{ submission_shares : "submission_id"
     submissions ||--o{ submission_visibility : "submission_id"
     submissions ||--o{ workflow_events : "submission_id"
     users |o--o{ submission_gisa : "updated_by_user_id"
+    users |o--o{ submission_gisa_cracks : "updated_by_user_id"
     users |o--o{ submission_share_reviews : "decided_by_user_id"
     users |o--o{ submission_shares : "ended_by_user_id"
     users |o--o{ submissions : "reviewed_by_user_id"
     users ||--o{ submission_drone_surveys : "created_by_user_id"
     users ||--o{ submission_editors : "granted_by_user_id"
     users ||--o{ submission_editors : "user_id"
+    users ||--o{ submission_gisa_cracks : "created_by_user_id"
     users ||--o{ submission_presence : "user_id"
     users ||--o{ submission_shares : "recipient_user_id"
     users ||--o{ submission_shares : "sharer_user_id"
@@ -1260,4 +1300,58 @@ erDiagram
     users |o--o{ offline_scene_jobs : "requested_by"
     users |o--o{ offline_scene_packages : "uploaded_by"
     users ||--o{ terrain_cross_sections : "created_by_user_id"
+```
+
+## Other
+
+Tables not yet assigned to a domain (add a rule in generate_schema_docs.py).
+
+```mermaid
+erDiagram
+    delegated_actions {
+        bigint id PK
+        bigint delegation_id FK
+        bigint actor_user_id FK
+        bigint acting_for_user_id FK
+        varchar method
+        varchar path
+        datetime created_at
+    }
+    immediate_action_deliveries {
+        bigint id PK
+        bigint submission_id FK
+        bigint actor_user_id FK
+        char client_uuid UK
+        longtext actions_json
+        text description
+        datetime written_at
+        datetime created_at
+    }
+    user_delegations {
+        bigint id PK
+        bigint delegator_user_id FK
+        bigint delegate_user_id FK
+        date starts_on
+        date ends_on
+        varchar note
+        bigint created_by_user_id FK
+        datetime created_at
+        datetime cancelled_at
+        bigint cancelled_by_user_id FK
+    }
+    submissions {
+        bigint id PK
+    }
+    users {
+        bigint id PK
+    }
+    submissions ||--o{ immediate_action_deliveries : "submission_id"
+    user_delegations ||--o{ delegated_actions : "delegation_id"
+    users |o--o{ user_delegations : "cancelled_by_user_id"
+    users ||--o{ delegated_actions : "acting_for_user_id"
+    users ||--o{ delegated_actions : "actor_user_id"
+    users ||--o{ immediate_action_deliveries : "actor_user_id"
+    users ||--o{ user_delegations : "created_by_user_id"
+    users ||--o{ user_delegations : "delegate_user_id"
+    users ||--o{ user_delegations : "delegator_user_id"
 ```

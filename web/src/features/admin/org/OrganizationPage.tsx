@@ -5,19 +5,14 @@ import { Building2, HardHat, Plus, TriangleAlert } from "lucide-react";
 import AppShell from "../../../ui/AppShell";
 import {
   addBranch,
-  addMaintenance,
   addOfficeChief,
   addSpecialist,
   addStaff,
   editBranch,
-  getMaintenance,
   getTree,
-  makePrimaryCoordinator,
   removeFromTree,
-  removeMaintenance,
   retireBranch,
   setBranchChief,
-  type MaintenancePayload,
   type OfficeTree,
   type PersonHit,
   type TreeBranch,
@@ -25,7 +20,6 @@ import {
   type TreePerson,
 } from "../../../api/orgTree";
 import OfficeTreeView, { branchTitle, type AddRequest } from "./OfficeTreeView";
-import MaintenanceDistricts from "./MaintenanceDistricts";
 import DistrictWorkflows from "./DistrictWorkflows";
 import PersonPickerDialog, { type PickRule } from "./PersonPickerDialog";
 import { BranchDialog, DetailsDialog, OfficeDialog } from "./OrgTreeDialogs";
@@ -35,7 +29,7 @@ type Picker = { title: string; target: string; rule: PickRule; onPick: (person: 
 const OFFICE_KEY = "eris_org_office";
 
 /**
- * Organization: one tree per GeoTech office, and the maintenance lists per
+ * Organization: one tree per GeoTech office, and the maintenance workflows per
  * district. Where a person sits decides their role; nobody is given a work role
  * any other way. Office chiefs manage their office's tree, branch chiefs their
  * branch's staff, administrators everything.
@@ -43,7 +37,6 @@ const OFFICE_KEY = "eris_org_office";
 export default function OrganizationPage() {
   const [params, setParams] = useSearchParams();
   const [tree, setTree] = useState<TreePayload | null>(null);
-  const [maintenance, setMaintenance] = useState<MaintenancePayload | null>(null);
   const [officeId, setOfficeId] = useState<number | null>(() => {
     try {
       const stored = Number(window.localStorage.getItem(OFFICE_KEY));
@@ -79,10 +72,6 @@ export default function OrganizationPage() {
     void loadTree();
   }, [loadTree]);
 
-  useEffect(() => {
-    if (tab !== "maintenance" || maintenance) return;
-    getMaintenance().then(setMaintenance).catch((e) => setError(e?.message ?? "Could not load the maintenance lists."));
-  }, [tab, maintenance]);
 
   const offices = tree?.offices ?? [];
   // The office picked last, else the person's own office, else the first.
@@ -124,7 +113,7 @@ export default function OrganizationPage() {
   }
 
   async function remove(person: TreePerson) {
-    if (!window.confirm(`Remove ${person.full_name} from the tree? They become a Guest unless they are on a maintenance list or an administrator.`)) return;
+    if (!window.confirm(`Remove ${person.full_name} from the tree? They become a Guest unless they are in a maintenance workflow or an administrator.`)) return;
     try {
       setTree(await removeFromTree(person.id));
       done(`${person.full_name} left the tree.`);
@@ -143,35 +132,11 @@ export default function OrganizationPage() {
     }
   }
 
-  function openMaintenanceAdd(district: string, kind: "coordinators" | "crew") {
-    const role = kind === "coordinators" ? "Maintenance Coordinator" : "Maintenance Crew";
-    setNotice(null);
-    setPicker({
-      title: `Add ${kind === "coordinators" ? "a coordinator" : "crew"} to District ${Number(district)}`,
-      target: `${role} in District ${Number(district)}`,
-      rule: { officeId: null, isAdmin: true, branchChiefOnly: false },
-      onPick: async (person) => {
-        setMaintenance(await addMaintenance(district, kind, person.id));
-        done(`${person.full_name} is now ${role} in District ${Number(district)}.`);
-      },
-    });
-  }
-
-  async function maintenanceRemove(district: string, kind: "coordinators" | "crew", person: { id: number; full_name: string }) {
-    if (!window.confirm(`Take ${person.full_name} off District ${Number(district)}'s ${kind === "coordinators" ? "coordinators" : "crew"}?`)) return;
-    try {
-      setMaintenance(await removeMaintenance(district, kind, person.id));
-      done(`${person.full_name} is off District ${Number(district)}'s list.`);
-    } catch (e: any) {
-      setError(e?.message ?? "Could not remove them.");
-    }
-  }
-
   return (
     <AppShell title="Organization">
       <div className="flex h-full flex-col gap-4 p-4 md:p-5">
         <div className="flex flex-wrap items-center gap-3">
-          <p className="min-w-0 flex-1 text-sm text-muted">
+          <p className="min-w-0 flex-[1_1_20rem] text-sm text-muted">
             GeoTech offices define their organization trees. Maintenance districts assign their own ERIS duties and workflows.
           </p>
           {tree ? (
@@ -196,7 +161,7 @@ export default function OrganizationPage() {
         {error ? <div role="alert" className="rounded-md border border-[color:color-mix(in_oklab,var(--bad)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--bad)_10%,transparent)] px-3 py-2 text-sm text-[var(--bad)]">{error}</div> : null}
         {notice ? <div role="status" className="rounded-md border border-[color:color-mix(in_oklab,var(--good)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--good)_10%,transparent)] px-3 py-2 text-sm text-[var(--good)]">{notice}</div> : null}
 
-        {tab === "maintenance" && <DistrictWorkflows maintenance={maintenance} onPublished={() => { void getMaintenance().then(setMaintenance); }} />}
+        {tab === "maintenance" && <DistrictWorkflows />}
         {tab === "offices" ? (
           <>
             {offices.length ? (
@@ -248,23 +213,7 @@ export default function OrganizationPage() {
               />
             )}
           </>
-        ) : maintenance ? (
-          <details className="border-t border-[var(--line)] pt-4"><summary className="cursor-pointer text-sm font-semibold">Districts using the current coordinator process</summary><div className="pt-4"><MaintenanceDistricts
-            districts={maintenance.districts.filter(d => !d.workflow_configured)}
-            onAdd={openMaintenanceAdd}
-            onRemove={maintenanceRemove}
-            onMakePrimary={async (district, userId) => {
-              try {
-                setMaintenance(await makePrimaryCoordinator(district, userId));
-                done("Primary coordinator changed.");
-              } catch (e: any) {
-                setError(e?.message ?? "Could not change the primary coordinator.");
-              }
-            }}
-          /></div></details>
-        ) : (
-          <p className="text-sm text-muted">Loading the maintenance lists…</p>
-        )}
+        ) : null}
       </div>
 
       {picker ? <PersonPickerDialog {...picker} onClose={() => setPicker(null)} /> : null}

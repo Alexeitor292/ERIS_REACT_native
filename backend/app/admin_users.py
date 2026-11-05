@@ -213,6 +213,17 @@ def _staff_picker_groups(items: list[dict], *, caller_branch_id: int | None) -> 
         ordinals.setdefault(group_key, sort_key)
         labels.setdefault(group_key, group)
     return [labels[key] for key in sorted(ordinals, key=lambda k: (ordinals[k], k))]
+def staff_of_branch(people: list[dict], branch_id: int | None) -> list[dict]:
+    """The Staff a branch chief may assign: those of this branch.
+
+    With no branch to go by (an assessment routed before the org model, opened by an
+    administrator) the office's Staff, which the query already narrowed to.
+    """
+    if branch_id is None:
+        return people
+    return [person for person in people if person.get("branch_id") is not None and int(person["branch_id"]) == int(branch_id)]
+
+
 @router.get("/assessment-assignment-options/{assessment_id}")
 def assessment_assignment_options(
     assessment_id: int = Path(..., ge=1),
@@ -233,7 +244,7 @@ def assessment_assignment_options(
         raise HTTPException(status_code=400, detail="kind=REVIEWER was retired; use CONSULTED")
 
     assessment = db.execute(
-        text("SELECT id, office_code FROM assessments WHERE id = :aid LIMIT 1"),
+        text("SELECT id, office_code, routed_branch_id FROM assessments WHERE id = :aid LIMIT 1"),
         {"aid": assessment_id},
     ).mappings().first()
     if not assessment:
@@ -249,9 +260,9 @@ def assessment_assignment_options(
             raise HTTPException(status_code=403, detail="Assessment is outside your assigned office")
 
     if kind == "ENGINEER":
-        eligible_roles = set([STAFF]) | {ADMIN}
+        eligible_roles = {STAFF}
     elif kind == "SENIOR_ENGINEER":
-        eligible_roles = set([SENIOR_SPECIALIST]) | {ADMIN}
+        eligible_roles = {SENIOR_SPECIALIST}
     else:
         # CONSULTED reproduces the previous REVIEWER behaviour: any operational
         # user may be attached for information. CONSULTED never conferred
@@ -268,33 +279,12 @@ def assessment_assignment_options(
     # covering another branch still gets a correct grouping (design §5).
     caller_branch_id = org_directory.resolve_user_org(db, user).get("branch_id")
 
+    # Who can be routed to is exact: a branch chief is offered the Staff of the branch
+    # the assessment was handed to, and an office chief the Senior Specialists of its
+    # office. Nobody from elsewhere, and no administrators (owner, 2026-11-03).
     office_filter = ""
-    if kind == "ENGINEER" and assessment_office:
-        # The permissive blank-office fallback stays for one release: removing it
-        # on day one would empty this picker in any deployment whose accounts have
-        # no recorded office (design §5).
-        office_filter = f"""
-          AND (
-            {office_code_sql} = :office_code
-            OR {office_code_sql} = ''
-          )
-        """
-    elif kind == "SENIOR_ENGINEER":
-        # Prefer the assessment's office, while keeping accounts created before
-        # office scoping assignable (PR #125): a Senior Specialist with NO office
-        # is offered, one scoped to a different office is not. An assessment with
-        # no office has no Senior Specialist to offer. ADMIN is exempt so the
-        # picker keeps its recovery escape hatch, matching the ENGINEER kind's
-        # `| {ADMIN}` union.
-        office_filter = f"""
-          AND (
-            (
-              :office_code <> ''
-              AND ({office_code_sql} = :office_code OR {office_code_sql} = '')
-            )
-            OR r.name = 'ADMIN'
-          )
-        """
+    if kind in {"ENGINEER", "SENIOR_ENGINEER"}:
+        office_filter = f"AND :office_code <> '' AND {office_code_sql} = :office_code"
 
     rows = db.execute(
         text(
@@ -320,6 +310,8 @@ def assessment_assignment_options(
     # counts — come from the same helper the two assessment pickers use, so all
     # three option endpoints answer with one contract (design §5).
     people = incidents_routes._picker_people(db, [int(uid) for uid in rows])
+    if kind == "ENGINEER":
+        people = staff_of_branch(people, assessment.get("routed_branch_id") or caller_branch_id)
     groups = _staff_picker_groups(people, caller_branch_id=caller_branch_id)
     order = {group["group_key"]: index for index, group in enumerate(groups)}
     people.sort(key=lambda i: (order.get(i["group_key"], len(order)), (i.get("full_name") or "").lower(), i["id"]))

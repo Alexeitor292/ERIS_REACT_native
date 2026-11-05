@@ -25,7 +25,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..deps import deny_public_only, require_roles
+from ..deps import deny_public_only, deny_public_only_unless_maintenance_reporter, require_roles
 from ..storage import ensure_bucket_exists, put_object_bytes, object_access_url
 from ..config import settings
 from ..services.roadway_context import centerlines as roadway_centerlines, cross_section as roadway_cross_section
@@ -394,7 +394,7 @@ def rollback_version(
 @router.get("/manifest")
 def get_manifest(
     db: Session = Depends(get_db),
-    _user=Depends(deny_public_only),
+    _user=Depends(deny_public_only_unless_maintenance_reporter),
 ):
     """Return the latest published dataset version metadata.
 

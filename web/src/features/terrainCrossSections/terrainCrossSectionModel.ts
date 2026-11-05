@@ -24,22 +24,9 @@ export type CrossSectionStats = {
   sample_count: number;
 };
 
-export type DemResolutionMode = "best-available" | "auto" | "target-1m" | "target-3m" | "target-10m";
-
 export type CrossSectionDemMetadata = {
-  source: "ARCGIS_WORLD_ELEVATION";
-  requested_mode: DemResolutionMode;
-  requested_resolution_m: number | null;
-  // ArcGIS queryElevation().sampleInfo.demResolution is the resolution at which Terrain3D was
-  // sampled. It can be a cached tile LOD (for example ~2.388657 m) and is NOT, by itself, proof
-  // of the native source raster cell size.
-  actual_min_resolution_m: number | null;
-  actual_max_resolution_m: number | null;
-  resolution_sample_count: number;
-  mixed_resolution: boolean;
-  // Native/source coverage comes from Esri World Elevation Data Extents PixelSize footprints.
-  // These are resolved per profile coordinate with finer footprints winning over overlapping
-  // coarse fallback datasets, matching the coverage overlay semantics.
+  source: "USGS_3DEP";
+  /** Which USGS sources lie under the path, as it answered point by point. */
   source_coverage?: DemCoverageProfileSummary;
 };
 
@@ -100,98 +87,19 @@ export function adaptiveSampleSpacingMeters(
   return Math.ceil(raw / 100) * 100;
 }
 
-export function demResolutionQueryValue(mode: DemResolutionMode): "finest-contiguous" | "auto" | number {
-  switch (mode) {
-    case "best-available":
-      return "finest-contiguous";
-    case "target-1m":
-      return 1;
-    case "target-3m":
-      return 3;
-    case "target-10m":
-      return 10;
-    case "auto":
-    default:
-      return "auto";
-  }
+export function usgsProfileMetadata(sourceCoverage?: DemCoverageProfileSummary): CrossSectionDemMetadata {
+  return { source: "USGS_3DEP", source_coverage: sourceCoverage };
 }
 
-export function demResolutionModeLabel(mode: DemResolutionMode): string {
-  switch (mode) {
-    case "best-available":
-      return "Best available";
-    case "target-1m":
-      return "Target 1 m";
-    case "target-3m":
-      return "Target 3 m";
-    case "target-10m":
-      return "Target 10 m";
-    case "auto":
-    default:
-      return "Automatic";
-  }
-}
+const formatMetres = (value: number) => (value < 10 ? `${+value.toFixed(1)} m` : `${Math.round(value)} m`);
 
-export function requestedDemResolutionMeters(mode: DemResolutionMode): number | null {
-  const value = demResolutionQueryValue(mode);
-  return typeof value === "number" ? value : null;
-}
-
-export function summarizeDemResolution(
-  sampleInfo: Array<{ demResolution?: number | null }> | null | undefined,
-  mode: DemResolutionMode,
-): CrossSectionDemMetadata {
-  const resolutions = (sampleInfo ?? [])
-    .map((sample) => Number(sample?.demResolution))
-    .filter((value) => Number.isFinite(value) && value > 0);
-  const min = resolutions.length ? Math.min(...resolutions) : null;
-  const max = resolutions.length ? Math.max(...resolutions) : null;
-  const mixed = min != null && max != null && Math.abs(max - min) > 0.01;
-
-  return {
-    source: "ARCGIS_WORLD_ELEVATION",
-    requested_mode: mode,
-    requested_resolution_m: requestedDemResolutionMeters(mode),
-    actual_min_resolution_m: min,
-    actual_max_resolution_m: max,
-    resolution_sample_count: resolutions.length,
-    mixed_resolution: mixed,
-  };
-}
-
-export function withDemSourceCoverage(
-  metadata: CrossSectionDemMetadata,
-  sourceCoverage: DemCoverageProfileSummary,
-): CrossSectionDemMetadata {
-  return { ...metadata, source_coverage: sourceCoverage };
-}
-
-function formatResolutionRange(min: number | null, max: number | null, mixed: boolean): string {
-  if (min == null || max == null) return "Unavailable";
-  const format = (value: number) => value < 10 ? `${value.toFixed(2)} m` : `${value.toFixed(1)} m`;
-  if (!mixed) return format(min);
-  return `${format(min)}–${format(max)}`;
-}
-
-/** Native/source raster resolution from Data Extents PixelSize, not Terrain3D cache LOD. */
+/** The source under the path: "1 m", or "1–10 m" when it changes along the way. */
 export function formatDemResolution(metadata: CrossSectionDemMetadata | null | undefined): string {
   const coverage = metadata?.source_coverage;
-  if (!coverage) return "Unavailable";
-  return formatResolutionRange(
-    coverage.min_pixel_size_m,
-    coverage.max_pixel_size_m,
-    coverage.mixed_resolution,
-  );
-}
-
-/** Resolution of the Terrain3D samples actually queried; may reflect a cached tile LOD. */
-export function formatTerrainSamplingResolution(metadata: CrossSectionDemMetadata | null | undefined): string {
-  if (!metadata) return "Unavailable";
-  return formatResolutionRange(
-    metadata.actual_min_resolution_m,
-    metadata.actual_max_resolution_m,
-    metadata.mixed_resolution,
-  );
+  if (!coverage || coverage.min_pixel_size_m == null || coverage.max_pixel_size_m == null) return "Unavailable";
+  return coverage.mixed_resolution
+    ? `${formatMetres(coverage.min_pixel_size_m)}–${formatMetres(coverage.max_pixel_size_m)}`
+    : formatMetres(coverage.min_pixel_size_m);
 }
 
 export function profileFromPath(

@@ -1,13 +1,14 @@
 # Triage and Incident Groups
 
-For **Maintenance Coordinators** (and administrators). You decide what happens
-to each new report in the districts you cover. Rules:
+For **administrators**. In a district with no maintenance workflow yet, you decide
+what happens to each new report; a district with one uses its
+[workflow](maintenance-workflows.md) instead, and you are not asked. Rules:
 [workflows: triage](../architecture/workflows.md#2-triage) and
 [Incident Groups](../architecture/workflows.md#3-incident-groups).
 
 ```mermaid
 flowchart LR
-    coord(["Maintenance Coordinator"])
+    coord(["Administrator"])
     subgraph ERIS
         t1["See reports to triage<br/>(My Work)"]
         t2["Decide: assessment required"]
@@ -18,7 +19,6 @@ flowchart LR
         g2["Edit a group's title and description"]
         g3["Close or reopen a group"]
         m1["See every group on the Mission Center"]
-        o1["Manage my district's crew list"]
     end
     coord --> t1
     coord --> t2
@@ -29,7 +29,6 @@ flowchart LR
     coord --> g2
     coord --> g3
     coord --> m1
-    coord --> o1
 ```
 
 ## Triage a report
@@ -79,14 +78,7 @@ An Incident Group gathers reports from one event (a storm on one route, say).
 The **Mission Center** shows every group with reports in the record on a map.
 Select a group or a report to zoom to it.
 
-## Your district's crew
-
-On **Organization**, open your district's lists to add or remove Maintenance
-Crew members. Only people already in ERIS can be added; an administrator
-creates new accounts ([administration](administration.md)).
-
 ## After triage
 
-You are notified when an assessment of one of your district's reports is
-approved, in the app and by email if email is set up. The incident's page shows
+The District Contact is told as the assessment moves along. The incident's page shows
 its **workflow tree**: every step, who has it now and what happened.

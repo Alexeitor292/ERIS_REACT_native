@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useParams, useSearchParams } from "react-router-dom";
 import LoginPage from "./pages/LoginPage";
 import EntraCompletePage from "./pages/EntraCompletePage";
 import SubmissionsPage from "./pages/SubmissionsPage";
@@ -16,7 +16,6 @@ import EventGroupsPage from "./pages/EventGroupsPage";
 import EventGroupDetailPage from "./pages/EventGroupDetailPage";
 import TerrainCrossSectionsPage from "./pages/TerrainCrossSectionsPage";
 import MyWorkPage from "./features/myWork/MyWorkPage";
-import MaintenanceWorkPage from "./features/incidents/MaintenanceWorkPage";
 import NotificationsPage from "./features/notifications/NotificationsPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import AppErrorBoundary from "./components/AppErrorBoundary";
@@ -26,6 +25,7 @@ import ProtectedRoute from "./auth/ProtectedRoute";
 import RoleRoute from "./auth/RoleRoute";
 import {
   ASSESSMENT_READ_ROLE_NAMES,
+  hasMaintenanceDuties,
   landingPathFor,
   OPERATIONAL_ROLE_NAMES,
   RECORD_READ_ROLE_NAMES,
@@ -59,11 +59,12 @@ export default function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/auth/entra/complete" element={<EntraCompletePage />} />
           <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
-          <Route path="/maintenance-work" element={<ProtectedRoute><MaintenanceWorkPage /></ProtectedRoute>} />
+          {/* Maintenance reports wait in My Work; links in earlier notifications still open them. */}
+          <Route path="/maintenance-work" element={<ProtectedRoute><MaintenanceWorkRedirect /></ProtectedRoute>} />
           <Route
             path="/my-work"
             element={
-              <RoleRoute roles={[...WORK_QUEUE_ROLE_NAMES]}>
+              <RoleRoute roles={[...WORK_QUEUE_ROLE_NAMES]} allowMaintenanceDuties>
                 <MyWorkPage />
               </RoleRoute>
             }
@@ -232,7 +233,14 @@ export default function App() {
  */
 function HomeRedirect() {
   const { me } = useAuth();
-  return <Navigate to={me?.maintenance_districts?.length ? "/maintenance-work" : landingPathFor(me?.roles)} replace />;
+  return <Navigate to={landingPathFor(me?.roles, hasMaintenanceDuties(me))} replace />;
+}
+
+/** `/maintenance-work?incident=12`, the page that was, now opens report 12 in My Work. */
+function MaintenanceWorkRedirect() {
+  const [params] = useSearchParams();
+  const incident = Number(params.get("incident"));
+  return <Navigate to={incident > 0 ? `/my-work?maintenance=${incident}` : "/my-work"} replace />;
 }
 
 function LegacyProjectRedirect() {

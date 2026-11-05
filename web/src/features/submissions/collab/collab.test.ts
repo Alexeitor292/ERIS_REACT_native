@@ -5,8 +5,8 @@ import { changedKeys, mergeFresh, rebase, sameValue } from "./formMerge.ts";
 import { colorFor, fieldLabel, initialsOf, memoWriters, othersIn, presenceSentence, type PresenceOther } from "./presenceModel.ts";
 
 test("a save sends only what this person changed", () => {
-  const base = { ea: "0A1", crack_length_ft: "3", notes: "", list: ["A"] };
-  assert.deepEqual(changedKeys(base, { ...base, crack_length_ft: "5", notes: null }), ["crack_length_ft"]);
+  const base = { ea: "0A1", settlement_in: "3", notes: "", list: ["A"] };
+  assert.deepEqual(changedKeys(base, { ...base, settlement_in: "5", notes: null }), ["settlement_in"]);
   assert.ok(sameValue(undefined, ""));
   assert.ok(!sameValue(["A"], ["A", "B"]));
 });
@@ -40,7 +40,7 @@ test("who is where, in circles with their initials", () => {
   assert.equal(othersIn(others, "card:report-header").length, 1);
   assert.equal(memoWriters(others).recommendations_notes.name, "John Lee");
   assert.equal(presenceSentence(others), "Maria Garcia and John Lee are also in this form");
-  assert.equal(fieldLabel("crack_length_ft"), "Crack length (ft)");
+  assert.equal(fieldLabel("settlement_in"), "Settlement (in)");
   assert.equal(fieldLabel("est_soil_pct"), "Estimated soil (%)");
   assert.equal(fieldLabel("memo:recommendations_notes"), "Recommendations");
 });

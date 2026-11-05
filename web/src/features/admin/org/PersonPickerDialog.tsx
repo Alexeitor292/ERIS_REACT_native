@@ -36,8 +36,6 @@ function whereNow(hit: PersonHit): string {
   const parts: string[] = [];
   if (hit.placement.label) parts.push(hit.placement.label);
   const districts = (list: string[]) => list.map((d) => `D${Number(d)}`).join(", ");
-  if (hit.maintenance.coordinator.length) parts.push(`Coordinator · ${districts(hit.maintenance.coordinator)}`);
-  if (hit.maintenance.crew.length) parts.push(`Crew · ${districts(hit.maintenance.crew)}`);
   if (parts.length) return parts.join(" · ");
   // Placed nowhere: a guest, an administrator, or somebody still holding a role from before the trees.
   const held = hit.roles.filter((role) => role !== "GUEST" && role !== "ADMIN");

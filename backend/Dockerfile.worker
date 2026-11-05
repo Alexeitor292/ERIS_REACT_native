@@ -21,7 +21,6 @@ COPY requirements.txt requirements-worker.txt ./
 RUN pip install --no-cache-dir -r requirements-worker.txt
 
 COPY app ./app
-COPY assets ./assets
 COPY alembic.ini .
 COPY migrations ./migrations
 

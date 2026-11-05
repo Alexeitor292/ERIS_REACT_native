@@ -91,8 +91,8 @@ class TestSiteHistory:
         return int(resp.json()["incident"]["id"])
 
     def test_one_list_with_each_incidents_maintenance_under_it(self, client_db, staff, form):
-        crew = _login(client_db, "mock.maintenance.crew@dot.ca.gov")
-        coordinator = _login(client_db, "mock.coordinator.d01@dot.ca.gov")
+        crew = _login(client_db, "mock.staff@dot.ca.gov")
+        coordinator = _login(client_db, "mock.admin@dot.ca.gov")
         in_record = self._report(client_db, crew, "Earlier slide")
         closed = self._report(client_db, crew, "Debris on shoulder")
         repeat = self._report(client_db, crew, "Same slide again")
@@ -123,7 +123,7 @@ class TestSiteHistory:
         other = client_db.post("/submissions", json={"title": "Earlier form"}, headers=staff)
         other_id = int(other.json()["submission_id"])
         staff_id = client_db.get("/auth/me", headers=staff).json()["id"]
-        coordinator_id = client_db.get("/auth/me", headers=coordinator).json()["id"]
+        coordinator_id = client_db.get("/auth/me", headers=_login(client_db, "mock.maintenance.crew@dot.ca.gov")).json()["id"]
         with engine.begin() as conn:
             conn.execute(
                 text("INSERT INTO incident_submission_links (incident_id, submission_id, linked_by_user_id) VALUES (:i, :s, :u)"),

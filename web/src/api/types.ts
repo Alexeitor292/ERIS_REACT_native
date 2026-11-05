@@ -1,3 +1,5 @@
+import type { Crack } from "../features/submissions/cracks/crackModel";
+
 /**
  * Account profile metadata (`users.metadata_json`) — a LEGACY MIRROR, never the
  * source. The org record (`UserOrg`, below) is where a person's office, branch
@@ -56,7 +58,13 @@ export type Me = {
   /** Legacy mirror; read `org` for anything organizational. */
   metadata?: UserMetadata;
   org?: UserOrg | null;
+  /** Present while someone else is acting for this person: who it really is. */
+  acting?: { delegation_id: number; user_id: number; full_name: string } | null;
+  /** Whom the person signed in may switch to acting for today. */
+  acting_options?: ActingOption[];
 };
+
+export type ActingOption = { delegation_id: number; user_id: number; full_name: string; ends_on: string };
 
 export type AdminUser = {
   id: number;
@@ -196,10 +204,6 @@ export type Gisa = {
   lanes_closed_count: number | null;
   open_highway_traffic_lanes_count: number | null;
   pavement_ground_cracks: boolean | null;
-  crack_length_ft: number | null;
-  crack_horizontal_in: number | null;
-  crack_vertical_in: number | null;
-  crack_depth_in: number | null;
   settlement_in: number | null;
   bulge_in: number | null;
   indented_by_rocks: boolean | null;
@@ -262,6 +266,8 @@ export type SubmissionDetail = {
   gisa: Gisa | null;
   incident_types: string[];
   actions: { immediate: string[]; follow_up: string[] };
+  /** Each crack is its own record (backend routes/cracks.py). */
+  cracks?: Crack[];
   photos: Attachment[];
   attachments: Attachment[];
   workflow_events: WorkflowEvent[];

@@ -13,15 +13,15 @@ branches, district coverage) is maintained as described in
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Crew as Maintenance Crew
-    actor Coord as Maintenance Coordinator
+    actor Crew as Maintenance reporter
+    actor Coord as Maintenance decider
     actor OC as Office Chief
     actor BC as Branch Chief
     actor Author as Staff / Senior Specialist
     participant ERIS
 
     Crew->>ERIS: Report an incident (location, photos)
-    ERIS-->>Coord: My Work + notification: triage
+    ERIS-->>Coord: My Work + notification: the district's workflow
     Coord->>ERIS: Assessment required, Incident Group, ERIS number
     ERIS-->>OC: Assessment to route
     alt Branch route
@@ -66,7 +66,7 @@ then `RESOLVED`.
 
 ```mermaid
 flowchart TD
-    report["New report<br/>COORDINATOR_REVIEW"] --> decide{"Coordinator decides"}
+    report["New report<br/>COORDINATOR_REVIEW"] --> decide{"Administrator decides"}
     decide -->|Assessment required| group{"Open Incident Group nearby?"}
     group -->|yes| attach["Attach to it"]
     group -->|no| start["Start a new group"]
@@ -111,7 +111,7 @@ stateDiagram-v2
 ```mermaid
 stateDiagram-v2
     [*] --> OPEN: started from a report at triage
-    OPEN --> CLOSED: every report resolved (coordinator or admin)
+    OPEN --> CLOSED: every report resolved (admin)
     CLOSED --> OPEN: reopened
     OPEN --> ARCHIVED: left with no reports (automatic)
     CLOSED --> ARCHIVED: left with no reports (automatic)
@@ -119,7 +119,7 @@ stateDiagram-v2
 
 ## 1. Field report
 
-A **Maintenance Crew** member, a **Staff** member or an administrator reports an
+Someone with a reporting part in their district's workflow, a **Staff** member or an administrator reports an
 incident, on the phone or with **Report an incident** on the web. The location
 can be given three ways: GPS (phone) or a point on a map (web), route and
 postmile with county, or latitude and longitude. Each is converted to the others
@@ -127,20 +127,20 @@ through the public Caltrans postmile layer.
 
 A new report is **provisional**: stage `COORDINATOR_REVIEW`, no ERIS number, not
 in any Incident Group, and not part of the incident record, the Incident Groups page or
-the Mission Center. Until triage, its reporter (or the coordinator, or an
+the Mission Center. Until triage, its reporter (or an
 administrator) may discard it.
 
 ## 2. Triage
 
-The **Maintenance Coordinator** covering the report's district (or an
-administrator) reviews it and makes one decision (`POST /incidents/{id}/triage`):
+In a district with a workflow, its steps decide who reviews it and who makes the
+final decision. Otherwise an administrator reviews it and makes one decision (`POST /incidents/{id}/triage`):
 
 | Decision | Result |
 | --- | --- |
-| **Assessment required** | The report **enters the incident record**. The coordinator attaches it to an open Incident Group nearby, or starts a new one. The report receives its permanent ERIS number, an assessment is created for the GeoTech office that serves the district, and the stage becomes `OFFICE_CHIEF_REVIEW`. |
+| **Assessment required** | The report **enters the incident record**. It is attached to an open Incident Group nearby, or starts a new one. The report receives its permanent ERIS number, an assessment is created for the GeoTech office that serves the district, and the stage becomes `OFFICE_CHIEF_REVIEW`. |
 | **No assessment required** | Closed at triage (stage `RESOLVED`). Kept with its decision and history, but with no ERIS number and no Incident Group, and it never appears in the record or the Mission Center. |
 | **Duplicate or linked** | Closed at triage the same way, linked to the report it duplicates. |
-| **Needs reporter information** | Sent back to the reporter. It stays provisional, is taken out of any Incident Group, and returns to the coordinator when the reporter answers. |
+| **Needs reporter information** | Sent back to the reporter. It stays provisional, is taken out of any Incident Group, and returns for a decision when the reporter answers. |
 
 Only "Assessment required" asks for an Incident Group. The database refuses to move
 a report out of triage without an Incident Group and an ERIS number, except when it
@@ -154,11 +154,11 @@ damaged several slopes on one route.
 - A report belongs to **at most one** group. New groups are started from a
   report: during triage, or by an administrator moving a report. There is no
   separate "create group" action.
-- Status is `OPEN`, `CLOSED` or `ARCHIVED`. Only an open group accepts reports. A
-  coordinator (or administrator) closes a group once every report in it is
+- Status is `OPEN`, `CLOSED` or `ARCHIVED`. Only an open group accepts reports. An
+  administrator closes a group once every report in it is
   resolved, and can reopen it. A group left with no reports is archived
   automatically.
-- Coordinators and administrators edit a group's title and description. Moving a
+- Administrators edit a group's title and description. Moving a
   report that is already in the record to another group is for administrators
   only.
 - The **Mission Center** shows every Incident Group holding at least one report in
@@ -206,21 +206,53 @@ The states are drawn in [assessment states](#assessment-states) above.
    see each area's size in square metres and acres. Areas save as the form's
    geometry the moment they change (one area as a GeoJSON Polygon, several as a
    MultiPolygon), the same geometry the mobile app draws. Below the GISA
-   sheet, **Measurements** puts the 3D terrain beside the landslide sketch and
-   its fields (H, α, Wd, Ld, Hs, β, Lr, Wr). **Measure** samples Esri World
-   Elevation (the finest resolution that covers the whole area) inside a drawn
-   area and in a band around it, in the browser. It then proposes β and α
-   (planes fitted inside and around), Ld along the fall line, Wd across it, and
-   H (the area's relief, 2nd to 98th percentile). **Measure road** rebuilds the
-   highway from its centerline and the road inventory at the form's route and
-   postmile (lanes, traveled way, shoulders and median), then proposes Lr (the
-   centerline length the area covers, along the curve) and Wr (the widest
-   roadway it covers at one station), with which lanes it reaches and a plan
-   sketch. Without an inventory row it assumes two 12 ft lanes and says so.
-   Proposals fill empty fields, or one field at a time. Nothing is saved until
-   the author saves the draft. Hs stays a field measurement.
+   sheet, **Measurements** shows the landslide sketch and its fields (H, α, Wd,
+   Ld, Hs, β, Lr, Wr), and **Open workspace** opens a full-screen screen for
+   measuring them. The workspace carries the only 3D map, so the form page stays
+   light, and it says, as the form does, that the data has not been reviewed by
+   land surveyors and is a suggestion, not fact.
 
-   **Drone surveys.** Under the 3D view, **Add a drone survey** takes the
+   Opening the workspace measures by itself, without saving anything; **Measure
+   again** does it on request and keeps the comparison with the survey. It samples
+   USGS 3DEP elevation (read about every metre, 1 m lidar wherever it exists), through ERIS, inside a
+   drawn area and in a band around it, in the browser. It then suggests β and α
+   (planes fitted inside and around), Ld along the fall line, Wd across it, and H
+   (the area's relief, 2nd to 98th percentile). Lr and Wr are measured on site.
+   Suggestions fill empty fields, or one field at a time. Nothing is saved until
+   the author saves the draft.
+
+   Each value has an eye button that draws it on the map, so it can be judged
+   against the ground: Ld and Wd follow the ground, H stands between its low and
+   high spots, and α and β are triangles raised just clear of the ground they were
+   fitted to. With a drone survey the map shows **Before** or **Now**, one at a
+   time, and a value shows on the ground it was measured on; switching one on goes
+   there. A second 3D map side by side was left out for the graphics load it adds.
+
+   **Main scarp height (Hs).** A drone survey suggests it: the largest drop
+   between the two grounds in the upper third of the area, down the fall line.
+   It is never part of **Use the suggested values**: someone chooses it, and it
+   stays marked for review on site.
+
+   **Profile and displacement.** Under the map, the ground along the section
+   (down the fall line, or a line drawn on the map), and with a drone survey the
+   displacement along it on the same distances. Pointing at the graph moves a dot
+   on the map.
+
+   **On the iPhone.** Measurements is built for typing in what was collected: the
+   sketch (tap it to read it large), the eight values grouped as on the website,
+   sliders for the angles and **Next** above the keyboard. They save with the form,
+   with or without a signal. **Measure** suggests values from an area drawn on the
+   map with the same calculations and the same USGS tiles as the website, so the
+   values match. The tiles are kept on the iPhone once read, and for assigned work
+   the ground within about 750 m of the site is fetched ahead of time, so an area
+   can be measured, or drawn and measured, with no signal. Beyond that, with no
+   signal, it uses the terrain package kept on the iPhone, which is coarser, and
+   says the values can differ. It reads the drone surveys uploaded on the website, kept on
+   the iPhone once read, and shows what changed, the profile and the displacement.
+   Surveys are added on the website. The iPhone has no values drawn on a map and no
+   hand-drawn section line.
+
+   **Drone surveys.** In the workspace's Surveys tab, **Add a drone survey** takes the
    elevation model (DSM or DEM GeoTIFF) and, optionally, the orthomosaic
    exported from DroneDeploy, Pix4D or similar software. The browser reads the
    files (any projected or geographic coordinate system, heights in metres,
@@ -290,7 +322,7 @@ The states are drawn in [assessment states](#assessment-states) above.
      report within 150 m, newest first. Incidents in the record are marked as a
      recurrence of the same type or a different type; reports that never
      entered it (closed at triage, awaiting triage) are marked as such. Under
-     each one is its maintenance: what the crew reported, the coordinator's
+     each one is its maintenance: what was reported, the
      decision and notes, the immediate and follow-up actions on its technical
      forms, notes the maintenance team left in its history, and later reports
      closed as duplicates of it. The tab keeps a notes field.
@@ -299,8 +331,9 @@ The states are drawn in [assessment states](#assessment-states) above.
 3. **The reviewer decides.** On the branch route that is the Branch Chief named
    on the assessment; on the Senior Specialist route, an Office Chief of the
    assessment's office. No other role and no assignment grants review authority.
-   - **Approve:** the assessment is `APPROVED`, which is final. The district's
-     coordinator is notified in the app and, if email is configured, by email.
+   - **Approve:** the assessment is `APPROVED`, which is final. The District
+     Contact and whoever decided the report are told in the app, and the latter by
+     email if email is configured.
      The record becomes readable by Guests.
    - **Request revision:** back to the author (`REVISION_REQUESTED`), who
      resubmits.
@@ -311,13 +344,33 @@ An Office Chief, a Branch Chief or an administrator can add anyone operational
 as **Consulted**, for information only. `FINALIZED` exists only on records
 approved before routing v2; the finalize endpoint now answers 410.
 
+## District Contact and Immediate Actions
+
+When maintenance sends an incident to GeoTech, by triage or a district workflow's
+decision, it names a **District Contact**: someone in that district's workflow. The hand-off starts on the district's default, set on Organization ›
+Maintenance by its workflow managers or an administrator, and can be
+changed each time. It can't go without one, unless the district has nobody to name.
+Their name fills the form's District Contact section, and they are told as the
+assessment moves. Being one gives no access to a form still in draft.
+
+**Immediate Actions are the one thing a draft can send.** On the form's Actions,
+Staff select the actions, describe what happened and choose **Deliver**. The notice
+goes at once to the supervisor of the person filling it out (a Staff member's branch
+chief, or a Senior Specialist's office chief) and to the District Contact, and it
+carries the actions and description itself, so nobody has to open the form. With no
+connection, the iPhone keeps it and delivers it when one returns, and the notice says
+when it was written. `services/district_contact.py`, `routes/field_notices.py`.
+
 ## 5. My Work
 
-**My Work** lists every step waiting on the signed-in person: triage for
-coordinators, routing for Office Chiefs, assignment for Branch Chiefs, forms for
+**My Work** lists every step waiting on the signed-in person: a district
+workflow's steps for whoever holds them, triage for administrators, routing for Office Chiefs, assignment for Branch Chiefs, forms for
 Staff and Senior Specialists, reviews for whoever holds review authority, and
-shares of technical forms for the branch and office chiefs who approve them or
-are told about them.
+shares of technical forms for whoever must approve them. What a chief is only told
+about comes as a notification, with the option to stop it, and does not wait here.
+Branch chiefs also find **Move work** here, to see who holds what; an office chief
+finds it when someone who moved on left work that needs them
+([organization.md](../user-guides/administration.md#when-someone-takes-over-a-role)).
 "Act on it" opens the exact step. An assessment's page also shows whose turn it
 is.
 
@@ -353,7 +406,8 @@ can still see that the assessment exists and where it stands.
 
 A form's owner can **share** it with named people, who can then view and edit
 it. Branch chiefs approve shares into or out of their branch, and office chiefs
-are told when one leaves their office or involves a Senior Specialist (see
+are told when one leaves their office or involves a Senior Specialist; they approve
+only a Senior Specialist sharing with one in another office (see
 [roles-and-identity.md](../security/roles-and-permissions.md#special-permits)). The **Sharing**
 card shows, before sharing, what it would take, and afterwards where each share
 stands.

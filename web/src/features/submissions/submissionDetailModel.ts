@@ -72,7 +72,7 @@ export type DistrictContact = {
 export const EMPTY_SUBMISSION_DRAFT: SubmissionDraft = {
   report_date: "", district: "", county: "", route: "", post_mile: "", ea: "", project_id: "", date_incident_reported: "", district_contact: "",
   latitude: "", longitude: "", distribution_code: "", highway_status_cause: "", highway_status_code: "", lanes_closed_count: "", open_highway_traffic_lanes_count: "",
-  crack_length_ft: "", crack_horizontal_in: "", crack_vertical_in: "", crack_depth_in: "", settlement_in: "", bulge_in: "",
+  settlement_in: "", bulge_in: "",
   est_soil_pct: "", est_clay_pct: "", est_silt_pct: "", est_sand_pct: "", est_gravel_pct: "",
   vegetation_trees: "", vegetation_bushes_shrubs: "", vegetation_groundcover: "",
   impact_adj_utilities: "", impact_adj_properties: "", impact_adj_structure: "",
@@ -189,11 +189,6 @@ export function pointFromLatLon(gisa: any): any | null {
 
 export function normalizeCounty(value: string) {
   return value.replace(/\s+County$/i, "").trim();
-}
-
-export function tryExtractRoute(addressText: string) {
-  const match = addressText.match(/\b(?:I|US|CA|SR)[-\s]?(\d{1,3})\b/i) || addressText.match(/\b(\d{1,3})\b/);
-  return normalizeRouteValue(match?.[1] ?? null);
 }
 
 export function normalizeDistrictValue(value: unknown) {

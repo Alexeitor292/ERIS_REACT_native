@@ -119,10 +119,6 @@ class People:
             self._post(f"/org/offices/{self.office_id(office)}/specialists", user)
         elif role == "OFFICE_CHIEF":
             self._post(f"/org/offices/{self.office_id(office)}/chiefs", user)
-        elif role == "MAINTENANCE_COORDINATOR":
-            self._post(f"/org/maintenance/{district}/coordinators", user)
-        elif role == "MAINTENANCE_CREW":
-            self._post(f"/org/maintenance/{district}/crew", user)
         elif role == "ADMIN":
             resp = self.client.put(f"/admin/users/{user['id']}/admin", json={"is_admin": True}, headers=self.admin)
             assert resp.status_code == 200, resp.text

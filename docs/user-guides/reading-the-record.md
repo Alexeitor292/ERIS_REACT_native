@@ -32,7 +32,7 @@ flowchart LR
 3. Open **Assessments** for the approved assessments.
 
 If a record you expect is missing, it is probably not approved yet. Ask the
-district's Maintenance Coordinator or the GeoTech office.
+district's Maintenance team or the GeoTech office.
 
 ## Getting more access
 

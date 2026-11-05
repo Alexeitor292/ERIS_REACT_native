@@ -9,12 +9,13 @@ import { useFormPresence } from "../features/submissions/collab/useFormPresence"
 import type { GisaLookups, SubmissionDetail } from "../api/types";
 import { getFormShares, type FormShares } from "../api/sharing";
 import AppShell from "../ui/AppShell";
+import ImmediateActionsDelivery from "../features/fieldNotices/ImmediateActionsDelivery";
 import { useAuth } from "../auth/AuthContext";
 import SubmissionDetailHeader from "../features/submissions/SubmissionDetailHeader";
 import SubmissionReviewerSupport from "../features/submissions/SubmissionReviewerSupport";
 import SubmissionAccessSharing from "../features/submissions/SubmissionAccessSharing";
-import SubmissionMeasurementContext from "../features/submissions/SubmissionMeasurementContext";
 import { DroneSurveyProvider } from "../features/submissions/drone/DroneSurveyContext";
+import SubmitConfirmDialog from "../features/submissions/SubmitConfirmDialog";
 import SiteMeasurementsPanel, { MEASURE_KEYS, type MeasureValues } from "../features/submissions/SiteMeasurementsPanel";
 import SubmissionLocationHero from "../features/submissions/SubmissionLocationHero";
 import SubmissionLibrary from "../features/submissions/SubmissionLibrary";
@@ -48,7 +49,6 @@ import {
   serializeDistrictContacts,
   textValue as t,
   triToBool,
-  tryExtractRoute,
   type DashboardCardId,
   type DistrictContact,
   type IncidentTypeOption,
@@ -63,11 +63,14 @@ import {
 } from "../utils/californiaCoordinateSystem";
 import { buildSubmissionDisplayTitle } from "../utils/submissionLabel";
 import { CALIFORNIA_COUNTIES, CALTRANS_DISTRICTS, countiesForDistrict, countyCodeFromNameOrCode, countyNameFromNameOrCode, districtForCounty, routesForDistrictCounty } from "../utils/caltransLookups";
+import { resolveCoordinates } from "../features/incidents/caltransPostmileClient";
 import { formatCoordinate, normalizeCoordinateValue, normalizePostMileInput, normalizePostMileValue, normalizeRouteInput, normalizeRouteValue } from "../utils/precision";
 import { isAssessmentAuthor, isOperationalUser, isPublicOnly } from "../utils/roleModel";
 import ActionChecklist from "../features/submissions/ActionChecklist";
 import { CompositionBar, DateField, FieldGroup, InlineField, NumberField, OptionTile, PanelChoice, Segmented, SliderField, Stepper } from "../features/submissions/gisaFields";
 import MemosPanel from "../features/submissions/MemosPanel";
+import CrackList from "../features/submissions/cracks/CrackList";
+import type { Crack } from "../features/submissions/cracks/crackModel";
 import SubmissionRecordCard from "../features/submissions/SubmissionRecordCard";
 import { chooseMemoContent, RICH_MEMO_KEYS, type RichMemoKey } from "../features/submissions/memoContentModel";
 import SavedLayoutsMenu from "../features/submissions/SavedLayoutsMenu";
@@ -123,7 +126,7 @@ function formFromDetail(d: SubmissionDetail): LoadedForm {
       date_incident_reported: t(gisa.date_incident_reported),
       district_contact: districtContactText,
       latitude: formatCoordinate(gisa.latitude), longitude: formatCoordinate(gisa.longitude), distribution_code: t(gisa.distribution_code), highway_status_cause: t(gisa.highway_status_cause), highway_status_code: t(gisa.highway_status_code), lanes_closed_count: t(gisa.lanes_closed_count), open_highway_traffic_lanes_count: t(gisa.open_highway_traffic_lanes_count),
-      pavement_ground_cracks: boolToTri(gisa.pavement_ground_cracks), crack_length_ft: t(gisa.crack_length_ft), crack_horizontal_in: t(gisa.crack_horizontal_in), crack_vertical_in: t(gisa.crack_vertical_in), crack_depth_in: t(gisa.crack_depth_in), settlement_in: t(gisa.settlement_in), bulge_in: t(gisa.bulge_in), indented_by_rocks: boolToTri(gisa.indented_by_rocks),
+      pavement_ground_cracks: boolToTri(gisa.pavement_ground_cracks), settlement_in: t(gisa.settlement_in), bulge_in: t(gisa.bulge_in), indented_by_rocks: boolToTri(gisa.indented_by_rocks),
       failure_rock_fall: incidentTri("failure_rock_fall", gisa.failure_rock_fall), failure_topple: incidentTri("failure_topple", gisa.failure_topple), failure_slide: incidentTri("failure_slide", gisa.failure_slide), failure_spread: incidentTri("failure_spread", gisa.failure_spread), failure_flow: incidentTri("failure_flow", gisa.failure_flow), failure_compound: incidentTri("failure_compound", gisa.failure_compound), failure_erosion: incidentTri("failure_erosion", gisa.failure_erosion), failure_surficial_failure: incidentTri("failure_surficial_failure", gisa.failure_surficial_failure), failure_scoured_toe: incidentTri("failure_scoured_toe", gisa.failure_scoured_toe), failure_washout: incidentTri("failure_washout", gisa.failure_washout),
       incident_type_description: t(gisa.incident_type_description),
       distribution_advancing: boolToTri(gisa.distribution_advancing), distribution_retrogressive: boolToTri(gisa.distribution_retrogressive), distribution_enlarging: boolToTri(gisa.distribution_enlarging), distribution_widening: boolToTri(gisa.distribution_widening), distribution_moving: boolToTri(gisa.distribution_moving), distribution_confined: boolToTri(gisa.distribution_confined),
@@ -171,7 +174,7 @@ function gisaPayload(draft: Draft, memos: Record<RichMemoKey, string>): Record<s
   return {
     report_date: nt(draft.report_date), district: nt(draft.district), county: nt(draft.county), route: normalizeRouteValue(draft.route), post_mile: normalizePostMileValue(draft.post_mile), ea: nt(draft.ea), project_id: nt(draft.project_id), date_incident_reported: nt(draft.date_incident_reported), district_contact: nt(draft.district_contact),
     latitude: normalizeCoordinateValue(nf(draft.latitude, "Latitude")), longitude: normalizeCoordinateValue(nf(draft.longitude, "Longitude")), distribution_code: nt(draft.distribution_code), highway_status_cause: nt(draft.highway_status_cause), highway_status_code: nt(draft.highway_status_code), lanes_closed_count: ni(draft.lanes_closed_count, "Lanes closed count"), open_highway_traffic_lanes_count: ni(draft.open_highway_traffic_lanes_count, "Open highway lanes"),
-    pavement_ground_cracks: triToBool(draft.pavement_ground_cracks), crack_length_ft: nf(draft.crack_length_ft, "Crack length"), crack_horizontal_in: nf(draft.crack_horizontal_in, "Crack horizontal"), crack_vertical_in: nf(draft.crack_vertical_in, "Crack vertical"), crack_depth_in: nf(draft.crack_depth_in, "Crack depth"), settlement_in: nf(draft.settlement_in, "Settlement"), bulge_in: nf(draft.bulge_in, "Bulge"), indented_by_rocks: triToBool(draft.indented_by_rocks),
+    pavement_ground_cracks: triToBool(draft.pavement_ground_cracks), settlement_in: nf(draft.settlement_in, "Settlement"), bulge_in: nf(draft.bulge_in, "Bulge"), indented_by_rocks: triToBool(draft.indented_by_rocks),
     failure_rock_fall: triToBool(draft.failure_rock_fall), failure_topple: triToBool(draft.failure_topple), failure_slide: triToBool(draft.failure_slide), failure_spread: triToBool(draft.failure_spread), failure_flow: triToBool(draft.failure_flow), failure_compound: triToBool(draft.failure_compound), failure_erosion: triToBool(draft.failure_erosion), failure_surficial_failure: triToBool(draft.failure_surficial_failure), failure_scoured_toe: triToBool(draft.failure_scoured_toe), failure_washout: triToBool(draft.failure_washout), incident_type_description: nt(draft.incident_type_description),
     distribution_advancing: triToBool(draft.distribution_advancing), distribution_retrogressive: triToBool(draft.distribution_retrogressive), distribution_enlarging: triToBool(draft.distribution_enlarging), distribution_widening: triToBool(draft.distribution_widening), distribution_moving: triToBool(draft.distribution_moving), distribution_confined: triToBool(draft.distribution_confined),
     material_rock: triToBool(draft.material_rock), material_soil: triToBool(draft.material_soil), material_bedding: triToBool(draft.material_bedding), material_joints: triToBool(draft.material_joints), material_fractures: triToBool(draft.material_fractures),
@@ -259,6 +262,7 @@ function shownValue(key: string, value: unknown): string {
 }
 
 const NO_ONE: readonly PresenceOther[] = [];
+const NO_CRACKS: Crack[] = [];
 
 const EMPTY_MEMOS: Record<RichMemoKey, string> = {
   observations_notes: "",
@@ -752,6 +756,7 @@ export default function SubmissionDetailPage() {
     void saveDraft();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resaveTick]);
+  const [confirmingSubmit, setConfirmingSubmit] = useState(false);
   async function submitDraft() {
     // A linked form is sent for review on its assessment; the server 409s here.
     if (assessmentLinked) {
@@ -866,25 +871,16 @@ export default function SubmissionDetailPage() {
 
       setDraft((prev) => ({ ...prev, latitude: formatCoordinate(lat), longitude: formatCoordinate(lon) }));
 
-      const reverseUrl =
-        `https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/reverseGeocode?` +
-        `location=${encodeURIComponent(`${lon},${lat}`)}&f=pjson&langCode=en`;
-      const geocodeRes = await fetch(reverseUrl);
-      if (!geocodeRes.ok) return;
-      const geocode = await geocodeRes.json();
-      const addr = geocode?.address ?? {};
-      const countyRaw = String(addr.Subregion ?? addr.County ?? "").trim();
-      const county = countyRaw ? normalizeCounty(countyRaw) : "";
-      const districtGuess = districtForCounty(county);
-      const routeGuess = tryExtractRoute(
-        [addr.StreetName, addr.Match_addr, addr.LongLabel, addr.ShortLabel].filter(Boolean).join(" ")
-      );
-
+      // The Caltrans postmile layer, not Esri's geocoder: what fills the form gets saved, and
+      // Esri forbids storing results of a request like this one.
+      const road = await resolveCoordinates(lat, lon);
+      if (!road) return;
+      const county = normalizeCounty(road.county);
       setDraft((prev) => ({
         ...prev,
         county: county || prev.county,
-        district: districtGuess || prev.district,
-        route: routeGuess || prev.route,
+        district: normalizeDistrictValue(road.district) || districtForCounty(county) || prev.district,
+        route: road.route || prev.route,
       }));
     } catch {
       // keep lat/lon if available; silent fallthrough with generic error
@@ -1021,11 +1017,6 @@ export default function SubmissionDetailPage() {
         : { ...prev, [key]: value, material_soil: "YES", material_rock: "NO", material_bedding: "NO", material_joints: "NO", material_fractures: "NO" }
     );
   };
-  /** A crack measurement means there are cracks. */
-  const setCrackMeasure = (key: "crack_length_ft" | "crack_horizontal_in" | "crack_vertical_in" | "crack_depth_in", value: string) => {
-    if (!canEdit) return;
-    setDraft((prev) => ({ ...prev, [key]: value, ...(value.trim() !== "" ? { pavement_ground_cracks: "YES" as const } : {}) }));
-  };
   const setWaterContent = (key: typeof baseWaterKeys[number] | "") => {
     if (!canEdit) return;
     setDraft((prev) => {
@@ -1083,17 +1074,6 @@ export default function SubmissionDetailPage() {
       setDraft((prev) => ({ ...prev, open_highway_traffic_lanes_count: "" }));
     }
   }, [openHighwayTrafficSelected, draft.open_highway_traffic_lanes_count]);
-  useEffect(() => {
-    if (draft.pavement_ground_cracks === "NO") {
-      setDraft((prev) => ({
-        ...prev,
-        crack_length_ft: "",
-        crack_horizontal_in: "",
-        crack_vertical_in: "",
-        crack_depth_in: "",
-      }));
-    }
-  }, [draft.pavement_ground_cracks]);
   useEffect(() => {
     const items = Object.entries(INCIDENT_TYPE_CODE_BY_FORM_KEY)
       .filter(([k]) => draft[k] === "YES")
@@ -1487,13 +1467,10 @@ export default function SubmissionDetailPage() {
                 <Segmented label="Indented by rocks" options={YES_NO} value={triValue(draft.indented_by_rocks)} onChange={(value) => setDraft((d) => ({ ...d, indented_by_rocks: triFrom(value) }))} />
               </InlineField>
             </div>
-            <FieldGroup title="Crack" className={draft.pavement_ground_cracks === "NO" ? "opacity-60" : ""}>
-              <div className="grid gap-x-4 gap-y-2 @lg:grid-cols-2">
-                <NumberField label="Length" unit="ft" value={draft.crack_length_ft} onChange={(value) => setCrackMeasure("crack_length_ft", value)} />
-                <SliderField label="Depth" unit="in" max={48} step={0.5} value={draft.crack_depth_in} onChange={(value) => setCrackMeasure("crack_depth_in", value)} />
-                <SliderField label="Horizontal displacement" unit="in" max={24} step={0.25} value={draft.crack_horizontal_in} onChange={(value) => setCrackMeasure("crack_horizontal_in", value)} />
-                <SliderField label="Vertical displacement" unit="in" max={24} step={0.25} value={draft.crack_vertical_in} onChange={(value) => setCrackMeasure("crack_vertical_in", value)} />
-              </div>
+            {/* Each crack is its own record, saved on its own (features/submissions/cracks). */}
+            <FieldGroup title="Cracks">
+              <CrackList submissionId={Number(id)} initial={data?.cracks ?? NO_CRACKS} canEdit={canEdit}
+                photos={memoPhotos} resolver={resolver} />
             </FieldGroup>
             <FieldGroup title="Deformation">
               <div className="grid gap-x-4 gap-y-2 @lg:grid-cols-2">
@@ -1626,12 +1603,22 @@ export default function SubmissionDetailPage() {
           submitLabel={data?.submission.status === "REJECTED" ? "Resubmit for review" : "Submit for review"}
           onRefresh={load}
           onSaveDraft={saveDraft}
-          onSubmitDraft={submitDraft}
+          onSubmitDraft={() => setConfirmingSubmit(true)}
           onApprove={() => review("APPROVE")}
           onReject={() => review("REJECT")}
           onDelete={onDeleteSubmission}
         />
 
+        {confirmingSubmit ? (
+          <SubmitConfirmDialog
+            resubmit={data?.submission.status === "REJECTED"}
+            onClose={() => setConfirmingSubmit(false)}
+            onConfirm={() => {
+              setConfirmingSubmit(false);
+              void submitDraft();
+            }}
+          />
+        ) : null}
         <PresenceBar others={presence.others} />
         {conflict && !conflictOpen ? (
           <div className="flex flex-wrap items-center gap-2 rounded-md border border-[color:color-mix(in_oklab,var(--warn-text)_45%,var(--line))] bg-[color:color-mix(in_oklab,var(--warn-text)_8%,var(--panel))] px-3 py-2 text-sm" role="status">
@@ -1747,7 +1734,7 @@ export default function SubmissionDetailPage() {
                   <SectionHeading
                     icon={<Ruler size={16} />}
                     title="Measurements"
-                    subtitle="The slide's dimensions, taken in the field or measured from the terrain under the area drawn on the map."
+                    subtitle="The slide's dimensions, taken in the field or suggested from the terrain and drone surveys."
                   />
                   <SectionAttachmentsButton
                     count={sectionCount(CARD_SECTION_KEYS.measurements)}
@@ -1755,18 +1742,15 @@ export default function SubmissionDetailPage() {
                     canAdd={canEdit}
                   />
                 </div>
-                <div className="grid gap-5 lg:grid-cols-2">
-                  <div className="min-w-0 lg:sticky lg:top-4 lg:self-start">
-                    <SubmissionMeasurementContext submissionId={data.submission.id} gisa={data.gisa} onReload={load} geometryJson={geom} height={560} />
-                  </div>
-                  <SiteMeasurementsPanel
-                    values={Object.fromEntries(MEASURE_KEYS.map((key) => [key, draft[key]])) as MeasureValues}
-                    onChange={(patch) => setDraft((d) => ({ ...d, ...patch }))}
-                    geojson={geom}
-                    canEdit={canEdit}
-                    road={{ county: countyCodeFromNameOrCode(draft.county), route: draft.route, postMile: draft.post_mile, district: draft.district }}
-                  />
-                </div>
+                <SiteMeasurementsPanel
+                  submissionId={data.submission.id}
+                  gisa={data.gisa}
+                  onReload={load}
+                  values={Object.fromEntries(MEASURE_KEYS.map((key) => [key, draft[key]])) as MeasureValues}
+                  onChange={(patch) => setDraft((d) => ({ ...d, ...patch }))}
+                  geojson={geom}
+                  canEdit={canEdit}
+                />
               </PresenceArea>
             ) : null}
 
@@ -1796,6 +1780,7 @@ export default function SubmissionDetailPage() {
                   editable={canEdit}
                 />
               </div>
+              {canEdit ? <ImmediateActionsDelivery submissionId={data.submission.id} actions={imm} /> : null}
             </PresenceArea>
 
             <PresenceArea area="section:memos" others={presence.others} className="rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-4">

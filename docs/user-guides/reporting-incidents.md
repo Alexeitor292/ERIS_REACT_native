@@ -1,11 +1,11 @@
 # Reporting incidents
 
-For **Maintenance Crew** members, and for Staff and administrators who report
-from the field. Rules behind each step: [workflows: field report](../architecture/workflows.md#1-field-report).
+For people with a reporting part in their district's maintenance workflow, and for
+Staff and administrators who report from the field. Rules behind each step: [workflows: field report](../architecture/workflows.md#1-field-report).
 
 ```mermaid
 flowchart LR
-    crew(["Maintenance Crew"])
+    crew(["Reporter"])
     subgraph ERIS
         r1["Report an incident<br/>(web or iPhone)"]
         r2["Give the location<br/>GPS, map, postmile or lat/long"]
@@ -38,8 +38,8 @@ button on the Incidents screen.
 3. **Photos.** Take them from the phone so each keeps its position and
    compass heading; the map shows where each was taken and which way it faced.
    Several photos from different sides help the engineers most.
-4. **Submit.** The report is now **provisional**: it waits for the district's
-   Maintenance Coordinator and has no ERIS number yet.
+4. **Submit.** The report is now **provisional**: it goes through the district's
+   workflow (an administrator decides if there is none) and has no ERIS number yet.
 
 No signal? The iPhone app keeps the report as an offline draft and sends it
 when you are back online.
@@ -49,7 +49,7 @@ when you are back online.
 ```mermaid
 stateDiagram-v2
     [*] --> Waiting: submitted
-    Waiting --> NeedsInfo: coordinator needs more from you
+    Waiting --> NeedsInfo: the reviewer needs more from you
     NeedsInfo --> Waiting: you answer
     Waiting --> Accepted: assessment required (ERIS number assigned)
     Waiting --> Closed: no assessment needed, or duplicate
@@ -62,14 +62,14 @@ stateDiagram-v2
 - **Accepted:** the report enters the incident record with a permanent ERIS
   number and is part of an Incident Group. GeoTech takes it from here.
 - **Closed at triage:** no assessment was needed, or it repeats another report.
-  It is kept, with the coordinator's decision, but never gets an ERIS number.
+  It is kept, with the decision, but never gets an ERIS number.
 - Until triage you can **discard** your own report if it was a mistake.
 
 ## Tips
 
 - One report per location. If a storm damaged several slopes, report each one;
-  the coordinator groups them.
-- A report that repeats an earlier one is fine: the coordinator links it as a
+  the decision groups them.
+- A report that repeats an earlier one is fine: it can be linked as a
   duplicate, and the earlier report's history shows it.
-- If your location is wrong, say so in the description; the coordinator can
+- If your location is wrong, say so in the description; the reviewer can
   review the location match.

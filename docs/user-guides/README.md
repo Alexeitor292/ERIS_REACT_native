@@ -7,8 +7,8 @@ diagram), then step by step how to do it. The rules behind each step are in
 
 | You are | Read |
 | --- | --- |
-| Maintenance Crew (field reporter) | [Reporting incidents](reporting-incidents.md) |
-| Maintenance Coordinator | [Triage and Incident Groups](triage-and-incident-groups.md) |
+| Maintenance, reporting | [Reporting incidents](reporting-incidents.md) |
+| Maintenance, reviewing or deciding | [District maintenance workflows](maintenance-workflows.md) |
 | Office Chief or Branch Chief | [Routing and review](routing-and-review.md) |
 | Staff or Senior Specialist | [Technical forms](technical-forms.md) |
 | Guest | [Reading the record](reading-the-record.md) |
@@ -19,8 +19,8 @@ diagram), then step by step how to do it. The rules behind each step are in
 
 ```mermaid
 flowchart LR
-    crew(["Maintenance Crew"])
-    coord(["Maintenance Coordinator"])
+    crew(["Maintenance reporter"])
+    coord(["Maintenance reviewer<br/>or decider"])
     oc(["Office Chief"])
     bc(["Branch Chief"])
     author(["Staff /<br/>Senior Specialist"])
@@ -81,16 +81,15 @@ flowchart LR
 
 ## What each role sees in the menu
 
-| Menu | Crew | Coordinator | Office / Branch Chief | Staff / Senior Specialist | Guest | Administrator |
-| --- | --- | --- | --- | --- | --- | --- |
-| Maintenance Work | if in a district maintenance workflow | if in a district maintenance workflow | if in a district maintenance workflow | if in a district maintenance workflow | — | ✓ |
-| My Work | — | ✓ | ✓ | ✓ | — | ✓ |
-| Mission Center, Incident Groups | — | ✓ | ✓ | ✓ | — | ✓ |
-| Incidents | ✓ | ✓ | ✓ | ✓ | ✓ (approved only) | ✓ |
-| Assessments | — | ✓ | ✓ | ✓ | ✓ (approved only) | ✓ |
-| GIS Tools: Terrain Cross Sections | — | ✓ | ✓ | ✓ | — | ✓ |
-| Organization | ✓ view | ✓ view; edits own district's crew | ✓ edits own office or branch | ✓ view | — | ✓ everything |
-| Administration: Users, Road Inventory | — | — | — | — | — | ✓ |
+| Menu | Maintenance | Office / Branch Chief | Staff / Senior Specialist | Guest | Administrator |
+| --- | --- | --- | --- | --- | --- |
+| My Work | if in a district's workflow | ✓ | ✓ | if in a district's workflow | ✓ |
+| Mission Center, Incident Groups | — | ✓ | ✓ | — | ✓ |
+| Incidents | ✓ | ✓ | ✓ | ✓ (approved only) | ✓ |
+| Assessments | — | ✓ | ✓ | ✓ (approved only) | ✓ |
+| GIS Tools: Terrain Cross Sections | — | ✓ | ✓ | — | ✓ |
+| Organization | ✓ view; edits workflows they manage | ✓ edits own office or branch | ✓ view | — | ✓ everything |
+| Administration: Users, Road Inventory | — | — | — | — | ✓ |
 
 Settings (theme, navigation, page transitions) and sign-out are in the profile
 menu at the top right for everyone.
@@ -101,10 +100,10 @@ menu at the top right for everyone.
 journey
     title A slope failure, from the road to the approved record
     section Field
-      Crew reports with photos: 4: Maintenance Crew
-    section Triage
-      Coordinator decides assessment required: 4: Maintenance Coordinator
-      Coordinator starts an Incident Group: 3: Maintenance Coordinator
+      A supervisor reports with photos: 4: Maintenance
+    section District workflow
+      The final decision sends it to GeoTech: 4: Maintenance
+      It starts or joins an Incident Group: 3: Maintenance
     section GeoTech
       Office Chief routes to a branch: 4: Office Chief
       Branch Chief assigns Staff: 4: Branch Chief

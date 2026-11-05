@@ -13,7 +13,9 @@ This module is what makes the claim TRUE rather than asserted. It walks the live
 route table and requires every route to be in exactly one of three groups:
 
 1. it carries ``require_roles`` somewhere in its dependency tree; or
-2. it carries ``deps.deny_public_only``; or
+2. it carries ``deps.deny_public_only`` (or its one narrowing,
+   ``deny_public_only_unless_maintenance_reporter``, which lets in only a
+   maintenance-duty reporter besides); or
 3. it is listed in ``services.public_visibility.VIEWER_READABLE_ROUTES``, the
    explicit, reviewed allow list whose values NAME the in-body predicate that
    does the narrowing (``viewer_can_read_public_submission``, and so on).
@@ -57,7 +59,7 @@ def _guards(route: APIRoute) -> set[str]:
     while stack:
         dependency = stack.pop()
         call = dependency.call
-        if call is deps.deny_public_only:
+        if call in (deps.deny_public_only, deps.deny_public_only_unless_maintenance_reporter, deps.deny_public_only_unless_maintenance_duty):
             found.add("deny_public_only")
         elif getattr(call, "__qualname__", "").startswith("require_roles."):
             found.add("require_roles")
@@ -210,8 +212,6 @@ class TestTerrainCrossSectionsAreRoleGuarded:
 
 
 DENY_LIST_ROUTES = [
-    # A write behind a read gate: it renders a PDF and inserts an attachment.
-    ("POST", "/submissions/{submission_id}/gisa/pdf"),
     # Personnel data — who else can see this record — not the record.
     ("GET", "/submissions/{submission_id}/shared-with"),
     ("GET", "/submissions/{submission_id}/permissions"),
@@ -285,7 +285,6 @@ class TestTheAllowListCoversTheViewersRecord:
             ("GET", "/submissions"),
             ("GET", "/submissions/{submission_id}"),
             ("GET", "/submissions/{submission_id}/geometry"),
-            ("GET", "/submissions/{submission_id}/gisa/pdf"),
             ("GET", "/submissions/{submission_id}/photo-map"),
             ("GET", "/attachments/{attachment_id}/download-url"),
             ("GET", "/attachments/{attachment_id}/content"),

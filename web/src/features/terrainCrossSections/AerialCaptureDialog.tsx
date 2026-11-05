@@ -203,7 +203,8 @@ function drawScaleBar(
 }
 
 function drawAttribution(ctx: CanvasRenderingContext2D, width: number, height: number) {
-  const text = "Aerial imagery © Esri and contributors";
+  // The capture leaves out the map's own attribution, which Esri requires, so it is drawn on the image.
+  const text = "Powered by Esri. Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community";
   ctx.save();
   ctx.font = "500 14px system-ui, sans-serif";
   const textWidth = ctx.measureText(text).width;

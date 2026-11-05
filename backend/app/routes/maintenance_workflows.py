@@ -28,6 +28,7 @@ class Action(BaseModel):
     notes: str = Field(min_length=1, max_length=4000)
     description: str | None = Field(default=None, max_length=20000)
     event_group_id: int | None = Field(default=None, ge=1)
+    district_contact_user_id: int | None = Field(default=None, ge=1)
     new_group_title: str | None = Field(default=None, max_length=255)
 
 
@@ -86,6 +87,11 @@ def publish(district: str, payload: Publish, db: Session = Depends(get_db), user
                 (district, revision, definition_json, updated_by_user_id) VALUES (:d, :r, :p, :u)"""), values)
         mw.event(db, district=district, actor=int(user["id"]), action="WORKFLOW_PUBLISHED",
                  metadata={"revision": revision + 1, "definition": definition})
+        # Being in a workflow is what makes someone Maintenance; leaving the last one ends it.
+        from ..services.org_tree import sync_roles
+        before = mw.participants(current["definition"]) if current else set()
+        for uid in sorted(before | users):
+            sync_roles(db, uid)
         db.commit()
         return {"district": district, "revision": revision + 1, "definition": definition, "can_manage": mw.can_manage(user, definition)}
     except IntegrityError:
@@ -113,7 +119,8 @@ def _payload(db, incident, workflow, user):
     return {"incident_id": incident["id"], "district": workflow["district"], "revision": workflow["revision"],
             "version": workflow["version"], "state": state, "outcome": workflow["outcome"], "step": step,
             "steps": [{"name": s["name"], "kind": s["kind"]} for s in definition["steps"]],
-            "assigned": [dict(p) for p in assigned], "events": [dict(e) for e in events], "groups": [dict(g) for g in groups],
+            # The database's 0 or 1 as true or false: the iPhone cannot read this answer otherwise.
+            "assigned": [{**p, "is_active": bool(p["is_active"])} for p in assigned], "events": [dict(e) for e in events], "groups": [dict(g) for g in groups],
             "can_act": not workflow["outcome"] and not state["waiting_reporter"] and uid in assigned_ids and uid not in state["approved_user_ids"],
             "can_edit": not workflow["outcome"] and (uid == incident["reporter_user_id"] or mw.capability(definition, uid, "edit_report")),
             "can_resubmit": not workflow["outcome"] and state["waiting_reporter"] and uid == incident["reporter_user_id"],
@@ -134,6 +141,8 @@ def work(db: Session = Depends(get_db), user=Depends(authenticated)):
             step = workflow["definition"]["steps"][workflow["state"]["step_index"]]
             result.append({"id": row["id"], "title": row["title"], "district": row["district"], "outcome": row["outcome"],
                            "step_name": step["name"], "waiting_reporter": workflow["state"]["waiting_reporter"],
+                           # So a reporter's app can list the reports they filed apart from those they review.
+                           "reported_by_me": row["reporter_user_id"] == int(user["id"]),
                            "my_turn": not row["outcome"] and ((workflow["state"]["waiting_reporter"] and row["reporter_user_id"] == int(user["id"])) or
                            (not workflow["state"]["waiting_reporter"] and int(user["id"]) in mw.users_for(workflow["definition"], step["duty_ids"]) and int(user["id"]) not in workflow["state"]["approved_user_ids"]))})
     return {"items": result}
@@ -195,6 +204,9 @@ def act(incident_id: int, payload: Action, db: Session = Depends(get_db), user=D
                 if workflow["state"].get("decision") and workflow["state"]["decision"] != decision:
                     raise HTTPException(409, "Use the same Incident Group as the first decision maker")
                 state["decision"] = decision
+                # Who it names is not part of agreeing on the outcome: the last one named stands.
+                if payload.action == "GEOTECH" and payload.district_contact_user_id:
+                    state["district_contact_user_id"] = payload.district_contact_user_id
                 step = definition["steps"][old_step]
                 complete = step["rule"] == "ANY" or mw.users_for(definition, step["duty_ids"]) <= set(state["approved_user_ids"])
                 if complete:
@@ -212,7 +224,8 @@ def act(incident_id: int, payload: Action, db: Session = Depends(get_db), user=D
                             event_group_id=payload.event_group_id, title=payload.new_group_title or incident["title"],
                             description=None, notes=notes)
                         assessments_routes._triage_assessment_required(db, incident, user,
-                            IncidentTriageRequest(disposition="ASSESSMENT_REQUIRED", notes=notes), notes)
+                            IncidentTriageRequest(disposition="ASSESSMENT_REQUIRED", notes=notes,
+                                                  district_contact_user_id=state.get("district_contact_user_id")), notes)
                     else:
                         assessments_routes._triage_no_assessment(db, incident, uid, notes)
         mw.save_state(db, workflow, state, outcome)
@@ -224,7 +237,7 @@ def act(incident_id: int, payload: Action, db: Session = Depends(get_db), user=D
         if payload.action == "REQUEST_INFORMATION":
             from ..services.notification_feed import add
             add(db, [incident["reporter_user_id"]], kind="MAINTENANCE_WORKFLOW", title="More report information needed",
-                body=notes, link=f"/maintenance-work?incident={incident_id}", incident_id=incident_id)
+                body=notes, link=f"/my-work?maintenance={incident_id}", incident_id=incident_id)
         db.commit()
         return detail(incident_id, db, user)
     except Exception:

@@ -64,8 +64,10 @@ def forget_provider_token() -> None:
 
 
 def payload(title: str, body: str, link: str | None, notification_id: int) -> bytes:
+    # content-available: iOS also wakes the app in the background, so it can
+    # fetch what the notice is about (new work assigned) before it is opened.
     return json.dumps({
-        "aps": {"alert": {"title": title, "body": body}, "sound": "default"},
+        "aps": {"alert": {"title": title, "body": body}, "sound": "default", "content-available": 1},
         "link": link,
         "id": notification_id,
     }, separators=(",", ":")).encode("utf-8")

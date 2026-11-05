@@ -1,12 +1,12 @@
 """The ERIS roles — one code per role, no aliases.
 
-Seven work roles, as the owner named them (2026-09-22), plus the system
+Six work roles, as the owner named them (2026-11-04), plus the system
 administrator:
 
-    MAINTENANCE_CREW          Maintenance Crew — files field reports from the
-                              road; sees only their own reports.
-    MAINTENANCE_COORDINATOR   Maintenance Coordinator — triages field reports
-                              for their district.
+    MAINTENANCE               Maintenance — their own reports, plus whatever their
+                              district's workflow assigns them (reporting, review,
+                              the final decision, seeing the district). The access
+                              comes from the workflow, not from the role.
     OFFICE_CHIEF              Office Chief — routes assessments of their GeoTech
                               office, and reviews the Senior Specialist route.
     BRANCH_CHIEF              Branch Chief — assigns Staff, and reviews the
@@ -21,8 +21,9 @@ administrator:
                               configuration; not a workflow role.
 
 Migration 20260923_roles_consolidated moved every account off the earlier codes
-(MAINTENANCE, MAINTENANCE_FIELD_WORKER, MAINT_COORDINATOR, GEOTECH_*,
-FIELD_WORKER, CALTRANS_VIEWER, REVIEWER) and deleted them. Nothing here accepts
+(MAINTENANCE_FIELD_WORKER, MAINT_COORDINATOR, GEOTECH_*, FIELD_WORKER,
+CALTRANS_VIEWER, REVIEWER) and deleted them; 20261105_one_maintenance_role folded
+Maintenance Crew and Maintenance Coordinator into MAINTENANCE. Nothing here accepts
 an old code any more: a guard lists exactly the roles it admits.
 
 Authentication may come from Entra ID; roles never do. Who holds which role,
@@ -41,8 +42,7 @@ form's reader and editor grants (``submission_visibility`` /
 
 from __future__ import annotations
 
-MAINTENANCE_CREW = "MAINTENANCE_CREW"
-MAINTENANCE_COORDINATOR = "MAINTENANCE_COORDINATOR"
+MAINTENANCE = "MAINTENANCE"
 OFFICE_CHIEF = "OFFICE_CHIEF"
 BRANCH_CHIEF = "BRANCH_CHIEF"
 SENIOR_SPECIALIST = "SENIOR_SPECIALIST"
@@ -52,8 +52,7 @@ ADMIN = "ADMIN"
 
 # Every role ERIS knows, in the order they are presented.
 ALL_ROLES: tuple[str, ...] = (
-    MAINTENANCE_CREW,
-    MAINTENANCE_COORDINATOR,
+    MAINTENANCE,
     OFFICE_CHIEF,
     BRANCH_CHIEF,
     SENIOR_SPECIALIST,
@@ -64,8 +63,7 @@ ALL_ROLES: tuple[str, ...] = (
 ALL_ROLE_NAMES: list[str] = sorted(ALL_ROLES)
 
 ROLE_TITLES: dict[str, str] = {
-    MAINTENANCE_CREW: "Maintenance Crew",
-    MAINTENANCE_COORDINATOR: "Maintenance Coordinator",
+    MAINTENANCE: "Maintenance",
     OFFICE_CHIEF: "Office Chief",
     BRANCH_CHIEF: "Branch Chief",
     SENIOR_SPECIALIST: "Senior Specialist",
@@ -74,14 +72,13 @@ ROLE_TITLES: dict[str, str] = {
     ADMIN: "Administrator",
 }
 
-# Field reporting. These users are scoped to their own incident reports and
-# reporting views only (narrow visibility).
-MAINTENANCE_REPORTING_ROLES: set[str] = {MAINTENANCE_CREW}
+# Scoped to their own incident reports and what their district's workflow gives
+# them (narrow visibility).
+MAINTENANCE_REPORTING_ROLES: set[str] = {MAINTENANCE}
 
 # The operational roles: broad read of operational data (incidents,
 # assessments, locations, timelines, ...).
 OPERATIONAL_ROLES: set[str] = {
-    MAINTENANCE_COORDINATOR,
     OFFICE_CHIEF,
     BRANCH_CHIEF,
     STAFF,
@@ -97,8 +94,9 @@ OPERATIONAL_ROLES: set[str] = {
 # by services/public_visibility.py instead.
 PUBLIC_VIEW_ROLES: set[str] = {GUEST}
 
-# Who may file a field report: the crew on the road, Staff, and administrators.
-FIELD_REPORTING_ROLES: list[str] = [MAINTENANCE_CREW, STAFF, ADMIN]
+# Who may reach the reporting routes. Maintenance also needs reporting duty in the
+# district's workflow (services/maintenance_workflows.authorize_report).
+FIELD_REPORTING_ROLES: list[str] = [MAINTENANCE, STAFF, ADMIN]
 
 # Authorship of the GISA technical form. The Senior Specialist fills the
 # assessment form exactly as Staff do (routing v2 decision 1).
@@ -127,7 +125,7 @@ def is_operational_user(user: dict) -> bool:
 
 
 def is_maintenance_only(user: dict) -> bool:
-    """True for users whose only relevant role is Maintenance Crew.
+    """True for users whose only relevant role is Maintenance.
 
     These users must be scoped to their own reports and must NOT receive broad
     operational visibility. Admins and any operational role override this.

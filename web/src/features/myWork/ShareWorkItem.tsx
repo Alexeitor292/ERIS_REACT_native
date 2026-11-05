@@ -9,7 +9,7 @@ const person = (value: { full_name: string | null; email: string | null }) => sh
 
 /**
  * A share waiting on a branch or office chief. APPROVAL: the share takes effect
- * only once every branch chief with a say approves. NOTICE: the chief is told,
+ * only once everyone with a say approves. NOTICE: the chief is told,
  * and may stop it; if they do nothing it stands.
  */
 export default function ShareWorkItem({ item, onDecided }: { item: ShareReviewItem; onDecided: (message: string) => void }) {
@@ -24,7 +24,7 @@ export default function ShareWorkItem({ item, onDecided }: { item: ShareReviewIt
     setError(null);
     try {
       const result = await decideShare(item, decision, note);
-      onDecided(decision === "APPROVE" && result.status === "PENDING" ? "Approved. It takes effect once the other branch chief approves too." : message);
+      onDecided(decision === "APPROVE" && result.status === "PENDING" ? "Approved. It takes effect once everyone else with a say approves too." : message);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not record your decision.");
       setBusy(false);
@@ -53,10 +53,10 @@ export default function ShareWorkItem({ item, onDecided }: { item: ShareReviewIt
 
       <p className="mt-3 text-sm">
         {approval
-          ? "It takes effect only once every branch chief below approves. Rejecting it stops it."
+          ? "It takes effect only once everyone below with a say approves. Rejecting it stops it."
           : item.status === "ACTIVE"
             ? "It is in effect. You need not do anything; you may stop it."
-            : "It is waiting on the branch chiefs. You need not do anything; you may stop it."}
+            : "It is waiting on someone else's approval. You need not do anything; you may stop it."}
       </p>
       <ul className="mt-2 grid gap-0.5 text-xs text-muted">
         {item.reviews.map((review) => <li key={review.id}>{shareReviewLine(review)}</li>)}

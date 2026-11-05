@@ -1,0 +1,125 @@
+# XcodeGen definition of the ERIS iOS app. CI generates ios/ERIS.xcodeproj from
+# this file and commits it, so the Mac needs only Xcode: open ERIS.xcodeproj.
+# Change targets, settings or packages here, never in the .xcodeproj.
+name: ERIS
+options:
+  bundleIdPrefix: gov.ca.dot
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+# One build per deployment.
+# - Debug and Staging: the Campos Labs staging ERIS (eris.camposlabs.org) until
+#   Caltrans hosts one; ArcGIS developer licensing; the ERIS password allowed
+#   when the server allows it. Their own bundle ID (org.camposlabs.eris), signed
+#   with the Campos Labs Apple team and sent to testers through TestFlight
+#   ("ERIS Staging" scheme → Archive → TestFlight).
+# - Release: the Caltrans production build, gov.ca.dot.eris, signed by Caltrans
+#   (enterprise, manual signing) and delivered through Intune Company Portal;
+#   Entra only, licensed with the 200.x license the production ERIS serves.
+#   Never archived with the Campos Labs team, so Caltrans's bundle ID is never
+#   registered under another account.
+configs:
+  Debug: debug
+  Staging: release
+  Release: release
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "4"
+packages:
+  ERISKit:
+    path: ERISKit
+  MSAL:
+    url: https://github.com/AzureAD/microsoft-authentication-library-for-objc
+    exactVersion: "1.9.0"
+  # Maps: the site-area editor, the photo map and offline basemaps. The API key
+  # and license come from ERIS at run time (/arcgis/runtime-config).
+  ArcGIS:
+    url: https://github.com/Esri/arcgis-maps-sdk-swift
+    exactVersion: "200.8.3"
+targets:
+  ERIS:
+    type: application
+    platform: iOS
+    sources:
+      - path: ERIS
+        excludes:
+          - "*.entitlements"
+          - "Info.plist"
+    dependencies:
+      - package: ERISKit
+      - package: MSAL
+      - package: ArcGIS
+        product: ArcGIS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: gov.ca.dot.eris
+        INFOPLIST_FILE: ERIS/Info.plist
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+        ERIS_DISPLAY_NAME: ERIS
+      # ERIS_API_BASE_URL: the ERIS API each build talks to (set the real hosts).
+      # ERIS_DEPLOYMENT: staging or production, which decides the maps' licensing.
+      configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: ERIS/ERIS-Debug.entitlements
+          PRODUCT_BUNDLE_IDENTIFIER: org.camposlabs.eris
+          DEVELOPMENT_TEAM: 7Q2NXVP8KR  # Campos Labs
+          ERIS_API_BASE_URL: https://eris.camposlabs.org/api
+          ERIS_DEPLOYMENT: staging
+        Staging:
+          # TestFlight builds use the production APNs gateway, as Release does.
+          CODE_SIGN_ENTITLEMENTS: ERIS/ERIS-Release.entitlements
+          PRODUCT_BUNDLE_IDENTIFIER: org.camposlabs.eris
+          DEVELOPMENT_TEAM: 7Q2NXVP8KR  # Campos Labs
+          ERIS_API_BASE_URL: https://eris.camposlabs.org/api
+          ERIS_DEPLOYMENT: staging
+          ERIS_DISPLAY_NAME: ERIS Staging
+        Release:
+          CODE_SIGN_ENTITLEMENTS: ERIS/ERIS-Release.entitlements
+          CODE_SIGN_STYLE: Manual
+          ERIS_API_BASE_URL: https://eris.example.gov/api
+          ERIS_DEPLOYMENT: production
+  # Drives Debug builds in demo mode (sample data, no sign-in) and saves
+  # screenshots; see ERISUITests/ScreenTour.swift.
+  ERISUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: ERISUITests
+    dependencies:
+      - target: ERIS
+    settings:
+      base:
+        # Run only against Debug builds, so they belong to the Campos Labs team.
+        PRODUCT_BUNDLE_IDENTIFIER: org.camposlabs.eris.uitests
+        DEVELOPMENT_TEAM: 7Q2NXVP8KR
+        GENERATE_INFOPLIST_FILE: YES
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+schemes:
+  ERIS:
+    build:
+      targets:
+        ERIS: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - ERISUITests
+    archive:
+      config: Release
+  ERIS Staging:
+    build:
+      targets:
+        ERIS: all
+    run:
+      config: Staging
+    profile:
+      config: Staging
+    analyze:
+      config: Staging
+    archive:
+      config: Staging

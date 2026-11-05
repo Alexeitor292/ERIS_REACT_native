@@ -105,7 +105,7 @@ alias dc='docker compose --env-file .env.proxmox -f docker-compose.yml -f docker
 6. **Start everything:**
 
    ```bash
-   export VITE_ARCGIS_API_KEY='<browser key>'   # optional; see configuration.md
+   export VITE_ARCGIS_API_KEY='<browser key>'   # required in production; see map-licensing.md
    dc up -d --build
    unset VITE_ARCGIS_API_KEY
    ```
@@ -386,7 +386,7 @@ build without `EXPO_PUBLIC_API_URL` cannot reach any server.
 - [ ] No file from `database/dev/` loaded; the first administrator made with
       `create_admin`.
 - [ ] `VITE_ARCGIS_API_KEY` restricted to the web app's origin, if used.
-- [ ] `SMTP_*` configured, if coordinators should get approval emails.
+- [ ] `SMTP_*` configured, if Maintenance should get approval emails.
 - [ ] Daily database and SeaweedFS backups, copied off the server, and a restore
       tried once.
 - [ ] Mobile builds made with `EXPO_PUBLIC_API_URL` pointing at this server.

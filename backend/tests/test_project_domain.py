@@ -56,8 +56,8 @@ def test_incident_is_root_and_approval_mints_permanent_identity(client_db, admin
     office_email = f"event-office-{unique}@example.test"
 
     people = People(client_db, admin_token)
-    maintenance = people.make("MAINTENANCE_CREW", email=maintenance_email, district="03")
-    coordinator = people.make("MAINTENANCE_COORDINATOR", email=coordinator_email, district="03")
+    maintenance = people.make("STAFF", email=maintenance_email)
+    coordinator = people.make("ADMIN", email=coordinator_email)
     people.make("OFFICE_CHIEF", email=office_email, office="NORTH")
 
     maintenance_headers = people.login(maintenance)
@@ -128,7 +128,7 @@ def test_multiple_incidents_share_event_group_attribute_without_sharing_identity
     office_email = f"event-share-office-{unique}@example.test"
 
     people = People(client_db, admin_token)
-    coordinator = people.make("MAINTENANCE_COORDINATOR", email=coordinator_email, district="03")
+    coordinator = people.make("ADMIN", email=coordinator_email)
     people.make("OFFICE_CHIEF", email=office_email, office="NORTH")
     coordinator_headers = people.login(coordinator)
 

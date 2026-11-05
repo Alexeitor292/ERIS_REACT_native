@@ -1,9 +1,9 @@
 # ERIS Mobile
 
 The field app for ERIS, built with Expo SDK 54 (React Native 0.81, expo-router).
-Maintenance Crew members file incident reports from the road. Staff and Senior
+Maintenance reporters file incident reports from the road. Staff and Senior
 Specialists fill technical assessments, with offline drafts and offline 3D
-terrain. Chiefs and coordinators follow their cases.
+terrain. Chiefs follow their cases.
 
 Maps and offline terrain use the ArcGIS Runtime SDK for iOS 100.15. A config
 plugin (`plugins/withArcGisIos.js`) adds it, so the app needs a **development

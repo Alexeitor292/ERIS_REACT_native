@@ -1,0 +1,113 @@
+# ERIS iOS app (native Swift)
+
+The Caltrans ERIS iPhone app: SwiftUI, Microsoft Entra sign-in through MSAL and
+Microsoft Authenticator, APNs push. The build contract is
+[docs/ios-native-app.md](../docs/development/ios.md); the Expo app in
+[`mobile/`](../mobile) is the reference until this app reaches parity.
+
+| Folder | What it is |
+| --- | --- |
+| `ERISKit/` | Swift package: models, API client, sign-in orchestration, role and notification rules. No UIKit, so its tests also run on Linux. |
+| `ERIS/` | The app: SwiftUI screens, MSAL token provider, Keychain session store, push registration. |
+| `project.yml` | XcodeGen definition. CI generates and commits `ERIS.xcodeproj`; edit this file, not the project. |
+
+## On the Caltrans Mac (Xcode only, no other tools)
+
+1. `git pull` the `claude/ios-swift-app` branch and open `ios/ERIS.xcodeproj`.
+2. Signing is set in `project.yml`, not in Xcode's signing pane (the project is
+   regenerated from it): Debug and Staging use the Campos Labs team
+   (`DEVELOPMENT_TEAM`) and `org.camposlabs.eris`; Release is signed by Caltrans as
+   `gov.ca.dot.eris`.
+3. Each configuration's server is in `project.yml` (`ERIS_API_BASE_URL`): Debug and
+   Staging use the Campos Labs staging ERIS, Release the Caltrans production API.
+4. Run on your iPhone.
+
+Each build is for one deployment (`ERIS_DEPLOYMENT`), which decides its server,
+sign-in, maps licensing and how it reaches phones:
+
+| Scheme → Archive | Bundle ID | Server | Sign-in | Maps licensing | Delivered by |
+| --- | --- | --- | --- | --- | --- |
+| **ERIS Staging** (Staging; "ERIS Staging" on the iPhone) | `org.camposlabs.eris` | `eris.camposlabs.org` | ERIS email and password when the server allows it; Entra when it has the mobile client | ArcGIS developer licensing | TestFlight, Campos Labs Apple team |
+| **ERIS** (Release) | `gov.ca.dot.eris` | Caltrans production | Entra only | the ArcGIS Maps SDK 200.x license from the production ERIS (`ARCGIS_LICENSE_KEY`) | Intune Company Portal, Caltrans enterprise signing (manual) |
+
+The two builds have different bundle IDs, so an iPhone can hold both. The Account
+screen shows the build and the maps' licensing; the sign-in screen of a staging build
+shows its server.
+
+### Staging on a Caltrans iPhone, through TestFlight
+
+Until Caltrans IT hosts ERIS and registers the Entra apps, staging runs on
+`eris.camposlabs.org`:
+
+1. **Server**: deploy this branch's backend (with its migrations), and set
+   `LOCAL_LOGIN_ENABLED=true` so the app offers the ERIS password. For push, set
+   `APNS_ENABLED=true`, `APNS_TOPIC=org.camposlabs.eris` and the `.p8` key, key ID and
+   team ID from the Campos Labs Apple account. Leave `ARCGIS_LICENSE_KEY` unset; set
+   `ARCGIS_RUNTIME_ENABLED=true` and `ARCGIS_API_KEY` for Esri basemaps. Password
+   sessions end after `SESSION_IDLE_MINUTES` without use; work kept on the iPhone
+   stays and is sent after the next sign-in.
+2. **App Store Connect** (Campos Labs account): create the app with the bundle ID
+   `org.camposlabs.eris`, and add each tester's Apple ID as an internal tester.
+3. **Xcode**: put the Campos Labs team ID in `DEVELOPMENT_TEAM` for Debug and Staging
+   in `project.yml` (not in the Xcode signing pane: the project is regenerated from
+   `project.yml`), choose the **ERIS Staging** scheme and **Any iOS Device**, then
+   **Product → Archive → Distribute App → TestFlight & App Store**.
+4. **iPhone**: install TestFlight, accept the invitation, and install ERIS Staging.
+   Each build lasts 90 days.
+
+### Production
+
+Archive the **ERIS** scheme with the Caltrans enterprise certificate and profile, export
+for Enterprise (in-house) distribution, and upload the `.ipa` to Intune as an iOS
+line-of-business app (see the spec for renewal dates).
+
+## Port status
+
+| Area | Status |
+| --- | --- |
+| Sign-in (MSAL + exchange), silent renewal, sign-out, Keychain | Ported |
+| Push registration and notification routing | Ported |
+| Role rules (`roleModel.ts`) with tests | Ported |
+| The app's shape | A narrow tool, not the web portal: each person gets the tabs their job needs (`AppTab`) and nothing to browse. My Work for anyone with steps waiting or a form shared with them; Report for maintenance reporters; Notifications and Account for everyone. Records are read on the web |
+| Who gets the app | Anyone placed in an office or on a district's list, anyone with a step in a district's maintenance workflow, and administrators. The server refuses everyone else on every request (`services/app_access.py`) and the app signs them out, keeping what it held. It reads the person's place again when it comes back and after each round, so tabs and queue follow a change of role without restarting |
+| Out of office and moving work | Account › Out of office names someone to act for you between two dates; a person acting sees a banner, and what they keep on the iPhone sits apart from their own. Chiefs have **Move work** in My Work (`docs/organization.md`) |
+| Opening and reading | The Expo app's opening animation plays at each launch (shorter with Reduce Motion). Account › Text sets the app's own text size, up to the largest accessibility sizes, and Bold Text; by default it follows the iPhone. The memo editor's web page and the map's labels do not follow it |
+| District Contact and Immediate Actions | See `docs/workflows.md`. A hand-off names a contact, starting on the district's default; the form's Actions deliver immediate actions from a draft, kept on the iPhone and sent when there is no connection |
+| Report: report an incident (GPS + Caltrans postmile + photos and videos from the camera or library, videos sent as 720p MP4) and follow one's own reports, read only; a report sent back for more information is answered from My Work | Ported; needs device test. The general incident list and the Expo app's claim/forward/resolve are gone: triage is done in My Work |
+| Notifications feed | Ported |
+| Forms: no tab of their own. A technical form opens from its assessment in My Work; My Work also lists forms in progress shared with the person, their own on no assessment, and any with changes still to send. Each opens in the GISA editor | Ported. The GISA PDF export is retired (2026-10-28) and not ported |
+| Assessments, from My Work: detail, branch-chief and Staff pickers, submit, review, timeline (the Assessments tab and its worklists are gone) | Ported; needs device test. Picker rules from the web's `personPickerModel.ts` (grouped, disabled branches, time-zone-safe return dates) |
+| GISA editor (`mobile/app/(tabs)/submissions/[id].tsx`, ~7,100 lines) | In progress. Core (load, rules, validation, save) and step 1 (Header, district contacts, Location with northing/easting) ported. Step 2: Distribution, Highway Status, Incident Type, Material and Pavement / Ground Status ported. Cracks are their own records (server `submission_gisa_cracks`): each with its photo, the five GISA-001 measures, direction, location and labels drawn on the photo; saved on their own. Vegetation on Slope, Water / Drainage (with the impact table), Water Content and Measurements (the sketch, the eight values with sliders for angles and Next above the keyboard, and on request suggestions, drone survey results, profile and displacement, as on the website, from Esri or the terrain kept on the iPhone). The road inventory card, elevation across the road and cross-section diagram are gone. Step 2 is done; Measurements also opens the site in 3D (see Maps). Step 3 (Assessment): the four memos (Observations, Geotechnical assessment, Recommendations, Sketch notes) are edited with the web form's own editor, built into `ERIS/Resources/MemoEditor.html` by `web/scripts/build-memo-ios.mjs` (CI checks it is current), so formatting, tables, figures and citations written on either survive the other; Record of incidents shows the site's history (earlier incidents with their maintenance) above the notes on earlier incidents, for operational roles as on the web. The Sketchpad draws with PencilKit (Apple Pencil or a finger) and files a PNG sketch under the Sketchpad section, ready to place as a figure in Sketch notes. Saving follows the web form's rules for a form several people have open: only changed fields are sent, each with the value it started from; someone else's saves are brought in where you have not typed; a field both changed is yours to choose; memos are locked while someone else writes them. Step 4 (Actions): immediate and follow-up actions from the server's lists (the lanes left open with Open highway traffic), and Notify Coordinator, which saves and sends the immediate actions with a justification; notices already sent stay listed on the step. Sending for review: the last step lists what the server requires (location, Geotechnical Assessment, a photo, soil and debris totals) and leads to each missing item; a form that belongs to an assessment is saved and sent for review on that assessment, as the server requires, and a legacy form without one is submitted, and decided by an administrator, on itself. Step 5 (Gallery): the Submission library lists every file on the form (photos, videos, documents, sketches) with its section, filtered as on the web; photos open with where and which way they were taken, everything else in Quick Look; photos and videos (several at a time) come from the camera or library, and PDFs, CAD and Office files from Files, up to the server's 95 MB each (HEIC becomes JPEG for the web). Files cannot be removed from a form: the server has no way to do so yet. Working offline (`mobile/src/offline`, redesigned for saving with others): the iPhone keeps the last copy of each form opened, the submissions list and the choice lists, so a form opened once opens again without a connection. Every change is kept on the iPhone as it is typed; Save without a connection keeps it to send, and photos, sketches and Gallery files wait on the iPhone too. When ERIS can be reached again (network back, app to the front, every 30 seconds, or Send Now) the changes are sent the way an online save is: caught up with what others saved first, so nothing of theirs is overwritten, and a field both changed waits for this person's choice; a file whose earlier answer was lost is looked for before it is sent again. Unlike the Expo app, a form is not created offline (forms now start from an assessment), and sending for review, notifying the coordinator and adding a crack need a connection. Signing out deletes what the iPhone kept, after a warning if anything is unsent; files are protected while the iPhone is locked and left out of backups. The map editor and Site Photo Map come with the maps phase |
+| Section photos: camera recording GPS and the rear camera's true-north direction, photo library (EXIF), filed per form section, photo view with location/direction and typed corrections | Ported (stage 1 of the crack/LiDAR plan); needs a device test, the simulator has no camera or compass. Map view and drag-to-correct come with the ArcGIS Site Photo Map |
+| Drafts, offline queue and sync (`mobile/src/offline`) | Ported, redesigned (see the GISA editor row). Incident reports (`incidentQueue.ts`): every report is kept on the iPhone with its photos (as JPEG) before it is sent, so a lost connection never loses one; kept reports are filed when ERIS can be reached, reports first. A report whose answer was lost is looked for (this reporter, the same moment first seen, place and words, in the incident list and in the district maintenance list) before it is filed again, and never filed blind when that check cannot be made. Photo corrections made offline are not queued yet |
+| Staying current without refreshing | Ported. One round (`OfflineSync.catchUp`) sends what is waiting, reloads My Work (kept on the iPhone for offline) and keeps the work assigned to the person ready (`AssignedWork`: for each assessment assigned to them in Draft or Revision requested, the assessment, its incident and the incident's photos, every technical form with its site history and photos, and the choice lists; photos of work no longer assigned are dropped). It runs every minute while the app is open, when it comes to the front, when the network returns, when a notice arrives (pushes carry `content-available`, so iOS wakes the app in the background; Apple delivers the latest one once an offline iPhone is back) and in iOS background refresh. Screens follow each round. Kept files are protected until the iPhone is first unlocked after a restart, so work can arrive while it is locked. The ArcGIS offline map comes with the maps phase |
+| My Work: one queue, as on the web: coordinator triage (decision, Incident Group, corrections, duplicates), maintenance workflow reviews and decisions (including the reporter answering a request), assessments to route, assign, complete and review, form shares to approve; administrators choose geotechnical, maintenance or both | Ported; needs device test |
+| Road inventory (`mobile/src/services/roadInventoryOffline.ts`) | Ported as a tool, not a screen: the published package (road segments and Caltrans postmile reference points) is checked against its SHA-256 and kept on the iPhone, checked daily and downloaded on Wi-Fi (on any network when there is none yet), with its status and Update Now under Account. Report's Use my location and the form header's Use My Location find the post mile from it without a connection, then online; Report can also find a post mile's coordinates and shows the road there (lanes, surface, speed). The Expo app's road inventory browsing screen is not ported. The server serves the package to every account but a read-only viewer, and to a viewer who reports for a district maintenance workflow |
+| Maps and offline terrain (ArcGIS Maps SDK for Swift 200.8) | In progress. The API key and license come from ERIS (`/arcgis/runtime-config`), kept for the server's offline window. Licensing follows the build's deployment (`ERIS_DEPLOYMENT`): Debug and Staging builds use developer licensing; the Release (production) build applies the 200.x license the production ERIS serves and, if none comes or the SDK refuses it (a 100.x Runtime license does not license 200.x), says so on the maps and the Account screen. Site areas: the form header's map draws, reshapes and removes the site's areas around its location, stored in `geometry_json` exactly as the web does (`SiteAreas`, ported with its tests). A published offline basemap (`mmpk_url`) is downloaded (on Wi-Fi unless there is none yet) and used when the online one cannot load; with neither, areas are drawn on a plain grid. The Site Photo Map shows where and which way each photo was taken. It and each photo open from what the iPhone kept (assigned forms' photo maps come with the work), and a photo's location or direction corrected without a connection is kept, shown as made, and sent with the rest of the waiting work, under its own id so a resend is not recorded twice; a correction ERIS refuses stays with the reason until discarded. Offline 3D terrain: the site's ERIS terrain package (USGS 3DEP elevation, hillshade, aerial imagery when packaged, roads) comes to the iPhone with the assigned work, checked (SHA-256, each entry's CRC) and unpacked (`AssignedTerrain`, with the terrain models ported with their tests); a form not assigned can ask for it from Measurements. Measurements opens it in SceneKit, with no network: elevation at true scale, vertical exaggeration 0.5× to 3×, imagery or relief, the site pin, its areas and the roads draped on the ground. Terrain of work no longer assigned is removed, unless changes to the form wait or it was asked for by hand. Not yet: the road slice, inspection and corridor tools. Not ported: the Mission Center map (browsing) |
+
+## Working on it on the Mac
+
+- `cd ios/ERISKit && swift test` runs the core tests in seconds.
+- Without XcodeGen installed, use the `ERIS.xcodeproj` CI committed; after changing
+  `project.yml`, push and let CI regenerate it (or install the XcodeGen release
+  binary into `~/bin`, which needs no admin rights).
+- Port one screen at a time. Put logic and API calls in `ERISKit` with tests ported
+  from the matching `*.test.ts`; keep SwiftUI views thin.
+- **Demo mode (Debug builds only).** Launch with the arguments `-ERISDemo YES` (Xcode:
+  scheme → Run → Arguments) to use built-in sample data with no sign-in and no network;
+  `-ERISDemoRoles OFFICE_CHIEF,STAFF` tries other roles (default `ADMIN`). An orange
+  banner shows it is on. `ERIS/Platform/DemoServer.swift` is wrapped in `#if DEBUG`, so
+  Release and Intune builds do not contain it.
+- **Screen tour.** `ERISUITests/ScreenTour.swift` walks the screens in demo mode and saves
+  a screenshot of each:
+  `TEST_RUNNER_ERIS_SCREENSHOT_DIR=/tmp/shots xcodebuild test -project ios/ERIS.xcodeproj -scheme ERIS -destination 'platform=iOS Simulator,name=iPhone 17'`.
+  Add a step there for each new screen.
+- **App icon.** `ERIS/Assets.xcassets/AppIcon.appiconset/AppIcon.png` is the web portal's logo
+  (`web/public/eris-logo.svg`) rendered on its yellow, edge to edge, by
+  `swift ios/scripts/render-app-icon.swift web/public/eris-logo.svg ios/ERIS/Assets.xcassets/AppIcon.appiconset/AppIcon.png 1024`.
+  Rerun it if the logo changes.
+- **Parity fixtures.** `node ios/scripts/make-parity-fixtures.mjs` (Node 22.18+) runs the Expo app's
+  TypeScript helpers and writes `ERISKit/Tests/ERISKitTests/Fixtures/gisa-helpers.json`; the Swift
+  tests check the ports against it. Rerun it when those TypeScript files change.
+- The server contract is `docs/ios-native-app.md`; never put a token in a URL, and
+  decode GISA forms with `preservingKeys: true`.

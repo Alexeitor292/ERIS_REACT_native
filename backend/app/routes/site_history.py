@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session
 from ..constants.gisa_lookups import GISA_ACTION_LUT, GISA_INCIDENT_TYPE_LUT
 from ..db import get_db
 from ..deps import require_roles
-from ..roles import MAINTENANCE_COORDINATOR, MAINTENANCE_CREW, OPERATIONAL_ROLES
+from ..roles import MAINTENANCE, OPERATIONAL_ROLES
 from ..services import form_access
 from .event_groups import is_outside_record
 
@@ -264,7 +264,7 @@ def site_history(
                  ORDER BY e.created_at, e.id
                 """
             ).bindparams(bindparam("ids", expanding=True), bindparam("maintenance_roles", expanding=True)),
-            {"ids": listed, "maintenance_roles": [MAINTENANCE_COORDINATOR, MAINTENANCE_CREW]},
+            {"ids": listed, "maintenance_roles": [MAINTENANCE]},
         ).mappings().all():
             notes.setdefault(int(note["incident_id"]), []).append(
                 {"text": _text(note["notes"]), "by": note["full_name"], "at": _iso(note["created_at"])}

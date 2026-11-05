@@ -6,7 +6,7 @@ const WORKFLOW_EVENT_LABELS: Record<string, string> = {
   RESUBMIT: "Resubmitted for review",
   APPROVE: "Approved",
   REJECT: "Returned for correction",
-  COORDINATOR_NOTIFIED: "Coordinator notified",
+  COORDINATOR_NOTIFIED: "Immediate actions delivered",
 };
 
 export function humanizeCode(value: string) {

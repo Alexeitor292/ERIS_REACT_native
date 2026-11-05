@@ -9,13 +9,21 @@ depends on where the two people sit in the office trees:
   through at once, and the branch chief is told and may stop it.
 * **Office chiefs are told, and may stop it**, when the share leaves their
   office or involves one of their Senior Specialists (who report to them
-  directly). They never have to approve.
+  directly). Nothing is asked of them unless they choose to stop it.
+* **The one thing an office chief approves:** a Senior Specialist sharing with a
+  Senior Specialist in another office. Both office chiefs approve, since those
+  two report to them directly and no branch chief stands between.
 
 So: same branch — immediate, branch chief notified. Two branches of one office
 — both branch chiefs approve. Two offices — both branch chiefs approve, both
-office chiefs notified. Senior Specialist to Senior Specialist — immediate,
-their office chief(s) notified. Staff to a Senior Specialist — the staff
-member's branch chief approves, the office chief(s) notified.
+office chiefs notified. Senior Specialist to Senior Specialist in one office —
+immediate, their office chief notified; in two offices — both office chiefs
+approve. A Senior Specialist to Staff of their office — that staff member's
+branch chief approves, the office chief notified. Staff to a Senior Specialist —
+the staff member's branch chief approves, the office chief(s) notified.
+
+A notice asks nothing: it reaches the chief as a notification they can open to
+stop the share, and only approvals wait in their My Work (2026-11-03).
 
 "From" is the form's owner; "to" is the person it is shared with. Someone
 placed nowhere (a coordinator, an unplaced account) brings no rule of their
@@ -71,6 +79,12 @@ def reviews_for(owner: Place, recipient: Place) -> list[Review]:
         for branch in (a, b):
             if branch:
                 add(BRANCH, branch, APPROVAL)
+    if (
+        owner.position == recipient.position == "SENIOR_SPECIALIST"
+        and owner.office and recipient.office and owner.office != recipient.office
+    ):
+        add(OFFICE, owner.office, APPROVAL)
+        add(OFFICE, recipient.office, APPROVAL)
     for person in (owner, recipient):
         if person.position == "SENIOR_SPECIALIST" and person.office:
             add(OFFICE, person.office, NOTICE)

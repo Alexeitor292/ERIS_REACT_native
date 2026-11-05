@@ -40,8 +40,8 @@ PowerShell has no `<` redirection; pipe the file instead:
 Get-Content -Raw database\dev\030_mock_accounts.sql | docker exec -i eris_mariadb sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" "$MARIADB_DATABASE"'
 ```
 
-The order matters: the organization-model migration builds each coordinator's
-district coverage from the accounts it finds. After `alembic upgrade head`, put
+The order matters: the organization-model migration builds district coverage
+from the accounts it finds. After `alembic upgrade head`, put
 the mock accounts in their places (roles come only from where people sit):
 
 ```bash

@@ -237,7 +237,7 @@ class TestIncidents:
         headers = {"Authorization": f"Bearer {admin_token}"}
         unique = uuid4().hex
         people = People(client_db, admin_token)
-        user_id = people.make("MAINTENANCE_CREW", "not-engineer", full_name="Zzz Not An Engineer", district="03")["id"]
+        user_id = people.make("GUEST", "not-engineer", full_name="Zzz Not An Engineer")["id"]
 
         incident = client_db.post(
             "/incidents",

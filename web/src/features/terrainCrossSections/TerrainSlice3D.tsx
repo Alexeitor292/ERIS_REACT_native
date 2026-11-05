@@ -6,7 +6,6 @@ import Graphic from "@arcgis/core/Graphic";
 import GraphicsLayer from "@arcgis/core/layers/GraphicsLayer";
 import Mesh from "@arcgis/core/geometry/Mesh";
 import MeshTexture from "@arcgis/core/geometry/support/MeshTexture";
-import Multipoint from "@arcgis/core/geometry/Multipoint";
 import Point from "@arcgis/core/geometry/Point";
 import Extent from "@arcgis/core/geometry/Extent";
 import SpatialReference from "@arcgis/core/geometry/SpatialReference";
@@ -25,6 +24,7 @@ import {
   type TerrainSliceData,
 } from "./terrainSliceModel";
 import { attachTerrainSourceBadge } from "../../components/terrainSourceBadge";
+import { readUsgsPoints } from "./demResolutionCoverageModel";
 
 const WGS84 = SpatialReference.WGS84;
 const DEFAULT_WIDTH_M = 100;
@@ -394,7 +394,7 @@ function TerrainSliceScene({
     let disposed = false;
     view.when(() => {
       if (disposed) return;
-      view.ui.components = ["zoom", "compass"];
+      view.ui.components = ["attribution", "zoom", "compass"];
       const extent = mesh.extent;
       if (extent) {
         view.goTo({ target: extent.expand(1.35), tilt: 67, heading: 315 }, { animate: false }).catch(() => {});
@@ -460,7 +460,6 @@ export default function TerrainSlice3D({
   basemapMode: MainBasemapMode;
   sceneScale: number | null;
 }) {
-  const queryMapRef = useRef<Map | null>(null);
   const requestIdRef = useRef(0);
   const [widthM, setWidthM] = useState(DEFAULT_WIDTH_M);
   const [surfaceOverride, setSurfaceOverride] = useState<SliceSurfaceOverride>("follow-map");
@@ -484,30 +483,18 @@ export default function TerrainSlice3D({
 
     const timer = window.setTimeout(async () => {
       try {
-        let queryMap = queryMapRef.current;
-        if (!queryMap) {
-          queryMap = new Map({ ground: "world-elevation" });
-          queryMapRef.current = queryMap;
-        }
-        await queryMap.ground.loadAll();
-
-        const multipoint = new Multipoint({
-          points: grid.points.map((point) => [point.longitude, point.latitude]),
-          spatialReference: WGS84,
-        });
-        const elevation = await queryMap.ground.queryElevation(multipoint, {
-          demResolution: "auto",
-          returnSampleInfo: true,
-        });
+        const { z } = await readUsgsPoints(grid.points.map((point) => [point.longitude, point.latitude]));
         if (requestId !== requestIdRef.current) return;
 
-        const sampled = elevation.geometry as Multipoint;
-        const next = terrainSliceFromSampledPoints(grid, sampled.points ?? [], elevation.noDataValue);
+        const next = terrainSliceFromSampledPoints(
+          grid,
+          grid.points.map((point, index) => [point.longitude, point.latitude, z[index] ?? Number.NaN]),
+        );
         setData(next);
       } catch (reason: unknown) {
         if (requestId !== requestIdRef.current) return;
         setData(null);
-        setError(reason instanceof Error ? reason.message : "Failed to sample the ArcGIS terrain slice.");
+        setError(reason instanceof Error ? reason.message : "Could not read the terrain for this slice.");
       } finally {
         if (requestId === requestIdRef.current) setBusy(false);
       }

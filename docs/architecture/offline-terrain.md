@@ -61,7 +61,8 @@ is the Esri variant, which needs `ARCGIS_RUNTIME_ENABLED=true` and an
 
 The phone renders packages with native iOS SceneKit screens
 (`mobile/plugins/arcgis-ios/`); there is no Android equivalent. The web app's
-3D terrain views are separate, online scenes built on Esri World Elevation.
+3D terrain views are separate, online scenes that show Esri World Elevation; values
+that get saved come from USGS (see [map licensing](../operations/map-licensing.md)).
 
 ## Elevation on technical forms
 
@@ -106,5 +107,9 @@ stays `processing` and the file must be uploaded again.
 
 Under **Terrain Cross Sections** on the web, operational users create Caltrans
 projects and draw cross sections for them on the 3D terrain. The elevation
-profile is sampled in the browser and saved with the section. Sections can be
+profile always comes from the finest source USGS 3DEP has at each point (1 m lidar
+wherever it exists), and the screen says which sources the path actually read and how
+much of each. **DEM coverage** colors the map by the finest USGS has at each place.
+Heights run every metre on a path of up to about 1.8 km, and further apart on longer
+ones. The profile is read in the browser and saved with the section. Sections can be
 added and edited while their project is `ACTIVE`; there is no delete.

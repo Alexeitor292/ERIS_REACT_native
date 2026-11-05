@@ -92,7 +92,7 @@ const NAMED: Record<string, string> = {
   "list:fol": "Follow-up actions",
 };
 
-/** A readable name for a form field ("crack_length_ft" -> "Crack length (ft)"). */
+/** A readable name for a form field ("settlement_in" -> "Settlement (in)"). */
 export function fieldLabel(key: string): string {
   const bare = key.replace(/^memo:/, "").replace(/_html$/, "");
   if (NAMED[bare]) return NAMED[bare];

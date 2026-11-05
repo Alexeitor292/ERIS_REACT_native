@@ -1,10 +1,10 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { ChevronDown, LogOut, Moon, Settings, Sun, Waves } from "lucide-react";
+import { CalendarOff, ChevronDown, LogOut, Moon, Settings, Sun, Users, Waves } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { useAuth } from "../auth/AuthContext";
-import { roleLabel } from "../utils/roleModel";
+import { isPublicOnly, roleLabel } from "../utils/roleModel";
 import { useUiSettings } from "./UiSettingsContext";
 
 const THEMES = [
@@ -22,14 +22,12 @@ function initialsOf(name: string): string {
 
 /** The signed-in person: who they are, the theme, Settings and Sign out. */
 export default function ProfileMenu({ orgLine }: { orgLine: string | null }) {
-  const { me, logout } = useAuth();
+  const { me, logout, actFor } = useAuth();
   const { theme, setTheme } = useUiSettings();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const name = me?.full_name?.trim() || me?.email || "Signed-in user";
-  const roles = (me?.maintenance_districts?.length && me.roles.every(role => role === "GUEST"))
-    ? "District maintenance duties"
-    : me?.roles?.map(roleLabel).join(" · ") || "ERIS user";
+  const roles = me?.roles?.map(roleLabel).join(" · ") || "ERIS user";
 
   useEffect(() => {
     if (!open) return;
@@ -102,8 +100,28 @@ export default function ProfileMenu({ orgLine }: { orgLine: string | null }) {
               </div>
             </div>
 
+            {me?.acting || me?.acting_options?.length ? (
+              <div className="border-t border-[var(--line)] p-1.5">
+                {me.acting ? (
+                  <button type="button" role="menuitem" onClick={() => actFor(null)} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-[var(--panel-soft)]">
+                    <Users size={16} className="text-muted" aria-hidden /> Back to my own work
+                  </button>
+                ) : null}
+                {(me.acting_options ?? []).filter((option) => option.user_id !== me.id).map((option) => (
+                  <button key={option.user_id} type="button" role="menuitem" onClick={() => actFor(option.user_id)} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-[var(--panel-soft)]">
+                    <Users size={16} className="text-muted" aria-hidden /> Act for {option.full_name}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
             <div className="border-t border-[var(--line)] p-1.5">
-              <Link to="/settings" role="menuitem" onClick={() => setOpen(false)} className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm hover:bg-[var(--panel-soft)]">
+{me && !isPublicOnly(me.roles) ? (
+                <Link to="/settings#out-of-office" role="menuitem" onClick={() => setOpen(false)} className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm hover:bg-[var(--panel-soft)]">
+                  <CalendarOff size={16} className="text-muted" aria-hidden /> Out of office
+                </Link>
+              ) : null}
+                            <Link to="/settings" role="menuitem" onClick={() => setOpen(false)} className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm hover:bg-[var(--panel-soft)]">
                 <Settings size={16} className="text-muted" aria-hidden /> Settings
               </Link>
               <button

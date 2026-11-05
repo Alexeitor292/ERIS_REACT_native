@@ -73,7 +73,10 @@ def test_incident_classification_follows_real_assessment_lifecycle(client_db, ad
     branch_options = client_db.get(f"/assessments/{assessment_id}/branch-options", headers=headers)
     assert branch_options.status_code == 200, branch_options.text
     assert branch_options.json()["items"], "Expected a configured branch chief option"
-    branch_chief_id = int(branch_options.json()["items"][0]["id"])
+    # The mock branch chief: their branch has mock Staff to assign.
+    branch_chief_id = next(
+        int(item["id"]) for item in branch_options.json()["items"] if item["email"] == "mock.branch.chief@dot.ca.gov"
+    )
 
     delegated = client_db.post(
         f"/assessments/{assessment_id}/delegate-branch",
@@ -86,10 +89,13 @@ def test_incident_classification_follows_real_assessment_lifecycle(client_db, ad
     # assertion below a v2 assertion rather than a legacy one.
     assert delegated.json()["assessment"]["routing_path"] == "BRANCH"
 
+    staff_options = client_db.get(f"/admin/assessment-assignment-options/{assessment_id}?kind=ENGINEER", headers=headers)
+    assert staff_options.status_code == 200, staff_options.text
+    assert staff_options.json()["items"], "Expected Staff of the branch to assign"
     assigned = client_db.post(
         f"/assessments/{assessment_id}/assign-engineer",
         headers=headers,
-        json={"engineer_user_id": admin_user_id, "notes": "Admin acts as eligible test engineer."},
+        json={"engineer_user_id": int(staff_options.json()["items"][0]["id"])},
     )
     assert assigned.status_code == 200, assigned.text
     submission_id = int(assigned.json()["assessment"]["submission_id"])

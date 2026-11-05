@@ -2,15 +2,14 @@
 
 Each GeoTech office is a tree: office chief(s) at the top; under them senior
 specialists (leaves) and branches; under each branch its chief and staff.
-Maintenance is a list per district: coordinators and crew.
+Maintenance people are whoever a district's workflow names.
 
 A person's work roles are DERIVED from those places and written to
 ``user_roles`` whenever a place changes (``sync_roles``), so every guard and
 scope in the system keeps reading ``user_roles`` exactly as before:
 
 - tree position OFFICE_CHIEF / SENIOR_SPECIALIST / BRANCH_CHIEF / STAFF -> that role;
-- an active coordinator row in any district -> MAINTENANCE_COORDINATOR;
-- an active crew row in any district -> MAINTENANCE_CREW;
+- named anywhere in a district's maintenance workflow -> MAINTENANCE;
 - ADMIN is the one role granted directly (Users page, by another
   administrator), and kept wherever the person sits, or if they sit nowhere:
   an administrator need not be in any tree (IT, for instance);
@@ -30,6 +29,7 @@ chief, is for administrators. Callers commit.
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from sqlalchemy import bindparam, text
@@ -46,7 +46,7 @@ POSITION_LABELS = {
     "STAFF": "Staff",
 }
 DISTRICTS = tuple(f"{n:02d}" for n in range(1, 13))
-TREE_ROLES = set(POSITIONS) | {"MAINTENANCE_COORDINATOR", "MAINTENANCE_CREW"}
+TREE_ROLES = set(POSITIONS) | {"MAINTENANCE"}
 
 
 class OrgTreeError(Exception):
@@ -70,6 +70,26 @@ def _roles_held(db: Session, user_id: int) -> set[str]:
     )
 
 
+def _in_a_maintenance_workflow(db: Session, user_id: int) -> bool:
+    """Named in a district's workflow, or in the version a report still open is following."""
+    rows = db.execute(
+        text(
+            """
+            SELECT definition_json FROM maintenance_workflows
+            UNION ALL
+            SELECT definition_json FROM maintenance_workflow_runs WHERE outcome IS NULL
+            """
+        )
+    ).scalars()
+    for raw in rows:
+        definition = raw if isinstance(raw, dict) else json.loads(raw)
+        if user_id in definition.get("manager_user_ids", []):
+            return True
+        if any(user_id in duty.get("user_ids", []) for duty in definition.get("duties", [])):
+            return True
+    return False
+
+
 def derived_roles(db: Session, user_id: int) -> set[str]:
     """The roles this person's places give them (ADMIN kept if already held)."""
     roles: set[str] = set()
@@ -89,16 +109,8 @@ def derived_roles(db: Session, user_id: int) -> set[str]:
         position = None
     if position in POSITIONS:
         roles.add(str(position))
-    if db.execute(
-        text("SELECT 1 FROM org_coordinator_coverage WHERE user_id = :uid AND is_active = 1 LIMIT 1"),
-        {"uid": int(user_id)},
-    ).scalar():
-        roles.add("MAINTENANCE_COORDINATOR")
-    if db.execute(
-        text("SELECT 1 FROM org_district_crew WHERE user_id = :uid AND is_active = 1 LIMIT 1"),
-        {"uid": int(user_id)},
-    ).scalar():
-        roles.add("MAINTENANCE_CREW")
+    if _in_a_maintenance_workflow(db, int(user_id)):
+        roles.add("MAINTENANCE")
     if "ADMIN" in _roles_held(db, user_id):
         roles.add("ADMIN")
     if not roles:
@@ -354,33 +366,6 @@ def office_tree(db: Session, office_id: int) -> dict[str, Any] | None:
     }
 
 
-def maintenance_lists(db: Session) -> list[dict]:
-    rows = db.execute(
-        text(
-            """
-            SELECT 'COORDINATOR' AS kind, c.district, c.is_primary, u.id, u.full_name, u.email, u.is_active
-              FROM org_coordinator_coverage c JOIN users u ON u.id = c.user_id
-             WHERE c.is_active = 1 AND u.is_active = 1
-            UNION ALL
-            SELECT 'CREW' AS kind, w.district, 0 AS is_primary, u.id, u.full_name, u.email, u.is_active
-              FROM org_district_crew w JOIN users u ON u.id = w.user_id
-             WHERE w.is_active = 1 AND u.is_active = 1
-            ORDER BY full_name
-            """
-        )
-    ).mappings().all()
-    by_district = {d: {"district": d, "coordinators": [], "crew": []} for d in DISTRICTS}
-    for row in rows:
-        district = str(row["district"]).strip()
-        entry = by_district.setdefault(district, {"district": district, "coordinators": [], "crew": []})
-        person = {"id": int(row["id"]), "full_name": row["full_name"] or row["email"], "email": row["email"]}
-        if row["kind"] == "COORDINATOR":
-            entry["coordinators"].append({**person, "is_primary": bool(row["is_primary"])})
-        else:
-            entry["crew"].append(person)
-    return [by_district[d] for d in sorted(by_district)]
-
-
 def search_people(db: Session, query: str, limit: int = 20) -> list[dict]:
     like = f"%{(query or '').strip()}%"
     rows = db.execute(
@@ -453,37 +438,11 @@ def offices_visible_to(db: Session, actor: dict) -> list[int]:
     """Every active office: anyone with access to ERIS, guests too, can read the whole organization.
 
     Who may change it is decided per office and branch (``can_manage_office``,
-    ``can_manage_branch``) and per district list (``can_manage_crew``,
-    ``can_manage_coordinators``).
+    ``can_manage_branch``).
     """
     return [int(i) for i in db.execute(
         text("SELECT id FROM org_offices WHERE org_type = 'GEOTECH' AND is_active = 1 ORDER BY sort_order, name")
     ).scalars().all()]
-
-
-def _coordinated_districts(db: Session, user_id: int) -> set[str]:
-    rows = db.execute(
-        text("SELECT district FROM org_coordinator_coverage WHERE user_id = :uid AND is_active = 1"), {"uid": int(user_id)}
-    ).scalars().all()
-    return {d for d in (normalize_district_code(r) for r in rows) if d}
-
-
-def can_manage_crew(db: Session, actor: dict, district: str) -> bool:
-    """A district's crew list: administrators, and that district's maintenance coordinators."""
-    return is_admin(actor) or normalize_district_code(district) in _coordinated_districts(db, int(actor["id"]))
-
-
-def can_manage_coordinators(db: Session, actor: dict, district: str) -> bool:
-    """Any district's coordinators: administrators and office chiefs."""
-    return is_admin(actor) or placement(db, int(actor["id"]))["position"] == "OFFICE_CHIEF"
-
-
-def maintenance_rights(db: Session, actor: dict) -> dict[str, dict[str, bool]]:
-    """District -> what this person may change there, for the page."""
-    admin = is_admin(actor)
-    crew = _coordinated_districts(db, int(actor["id"]))
-    coordinators = admin or placement(db, int(actor["id"]))["position"] == "OFFICE_CHIEF"
-    return {d: {"crew": admin or d in crew, "coordinators": coordinators} for d in DISTRICTS}
 
 
 def _office_chief_count(db: Session, office_id: int, *, excluding: int | None = None) -> int:
@@ -761,94 +720,6 @@ def _district(value: str) -> str:
     if district not in DISTRICTS:
         raise OrgTreeError(422, "Districts are 01 to 12.")
     return district
-
-
-def _require_list_right(db: Session, actor: dict, district: str, kind: str) -> None:
-    from .maintenance_workflows import config
-    if config(db, district):
-        raise OrgTreeError(409, "This district uses configurable maintenance duties. Edit its workflow instead.")
-    if kind == "CREW" and not can_manage_crew(db, actor, district):
-        raise OrgTreeError(403, "Only this district's maintenance coordinators or an administrator can change its crew.")
-    if kind == "COORDINATOR" and not can_manage_coordinators(db, actor, district):
-        raise OrgTreeError(403, "Only an office chief or an administrator can change a district's coordinators.")
-
-
-def add_maintenance(db: Session, actor: dict, *, district: str, user_id: int, kind: str) -> None:
-    district = _district(district)
-    _require_list_right(db, actor, district, kind)
-    if not db.execute(text("SELECT 1 FROM users WHERE id = :uid AND is_active = 1"), {"uid": int(user_id)}).scalar():
-        raise OrgTreeError(404, "That person is not an active ERIS user.")
-    if kind == "COORDINATOR":
-        db.execute(
-            text(
-                """
-                INSERT INTO org_coordinator_coverage (district, user_id, is_primary, is_active)
-                VALUES (:d, :uid, CASE WHEN EXISTS (SELECT 1 FROM org_coordinator_coverage c
-                                                     WHERE c.district = :d AND c.is_active = 1 AND c.is_primary = 1)
-                                       THEN 0 ELSE 1 END, 1)
-                ON DUPLICATE KEY UPDATE is_active = 1, updated_at = NOW()
-                """
-            ),
-            {"d": district, "uid": int(user_id)},
-        )
-    elif kind == "CREW":
-        db.execute(
-            text(
-                """
-                INSERT INTO org_district_crew (district, user_id, is_active) VALUES (:d, :uid, 1)
-                ON DUPLICATE KEY UPDATE is_active = 1, updated_at = NOW()
-                """
-            ),
-            {"d": district, "uid": int(user_id)},
-        )
-    else:
-        raise OrgTreeError(422, "Unknown list.")
-    sync_roles(db, user_id)
-
-
-def remove_maintenance(db: Session, actor: dict, *, district: str, user_id: int, kind: str) -> None:
-    district = _district(district)
-    _require_list_right(db, actor, district, kind)
-    table = {"COORDINATOR": "org_coordinator_coverage", "CREW": "org_district_crew"}.get(kind)
-    if not table:
-        raise OrgTreeError(422, "Unknown list.")
-    result = db.execute(
-        text(f"UPDATE {table} SET is_active = 0, updated_at = NOW() WHERE district = :d AND user_id = :uid AND is_active = 1"),
-        {"d": district, "uid": int(user_id)},
-    )
-    if not result.rowcount:
-        raise OrgTreeError(404, "That person is not on this list.")
-    if kind == "COORDINATOR":
-        # Keep a deterministic first recipient: promote the earliest remaining coordinator.
-        if not db.execute(
-            text("SELECT 1 FROM org_coordinator_coverage WHERE district = :d AND is_active = 1 AND is_primary = 1"),
-            {"d": district},
-        ).scalar():
-            db.execute(
-                text(
-                    """
-                    UPDATE org_coordinator_coverage SET is_primary = 1
-                     WHERE district = :d AND is_active = 1
-                     ORDER BY created_at, id LIMIT 1
-                    """
-                ),
-                {"d": district},
-            )
-    sync_roles(db, user_id)
-
-
-def set_primary_coordinator(db: Session, actor: dict, *, district: str, user_id: int) -> None:
-    district = _district(district)
-    _require_list_right(db, actor, district, "COORDINATOR")
-    if not db.execute(
-        text("SELECT 1 FROM org_coordinator_coverage WHERE district = :d AND user_id = :uid AND is_active = 1"),
-        {"d": district, "uid": int(user_id)},
-    ).scalar():
-        raise OrgTreeError(404, "That person is not a coordinator here.")
-    db.execute(
-        text("UPDATE org_coordinator_coverage SET is_primary = (user_id = :uid) WHERE district = :d AND is_active = 1"),
-        {"d": district, "uid": int(user_id)},
-    )
 
 
 # --- a person's details ------------------------------------------------------

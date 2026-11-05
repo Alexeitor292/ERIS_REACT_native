@@ -89,8 +89,8 @@ is fixed in code, and the API creates the bucket on first use.
 
 ### Email notifications
 
-ERIS emails one notice today: the district coordinator hears when an assessment
-is approved. Email is **off while `SMTP_HOST` is unset**; the notice is still
+ERIS emails one notice today: whoever decided the report, and Maintenance people whose home district it is,
+hear when an assessment is approved. Email is **off while `SMTP_HOST` is unset**; the notice is still
 recorded and shown in the app. When a relay is configured, delivery is attempted
 right after the approval, and anything left over is retried at every API start. Addresses that
 start with `mock.` are never handed to a real relay.
@@ -138,9 +138,17 @@ server-side values; never reuse them as the web's `VITE_ARCGIS_API_KEY`.
 | --- | --- | --- |
 | `ARCGIS_RUNTIME_ENABLED` | `false` | Turns the runtime configuration on. The Esri offline-scene builder also requires it. |
 | `ARCGIS_API_KEY` | unset | ArcGIS API key for the native runtime. |
-| `ARCGIS_LICENSE_KEY` / `ARCGIS_LICENSE_EXPIRES_AT` | unset | Runtime license string and its expiry. |
+| `ARCGIS_LICENSE_KEY` / `ARCGIS_LICENSE_EXPIRES_AT` | unset | Runtime license string and its expiry. Production: the ArcGIS Maps SDK 200.x license string (a 100.x Runtime license does not license the iOS app's SDK). Staging: leave unset. |
 | `ARCGIS_MMPK_URL` | unset | URL of an offline mobile map package, if one is published. |
 | `ARCGIS_CONFIG_OFFLINE_TTL_HOURS` | `168` | How long the phone may use a cached configuration while offline. |
+
+The iOS app is built per deployment (`ios/project.yml`): the **ERIS Staging**
+scheme talks to the staging server and runs the maps under ArcGIS developer
+licensing, ignoring any license the server sends; the **ERIS** scheme's archive
+(Release) is the production build, which applies the license from
+`ARCGIS_LICENSE_KEY`. If the production server sends none, or the SDK refuses
+or finds it expired, the production app says so on its maps and on the Account
+screen (which also shows the build and the maps' license level).
 
 ### Postmile lookup (server side)
 
@@ -152,11 +160,11 @@ county, route and postmile) and the road bearing for a technical form. Unset,
 those return no postmile data. The web and mobile apps' own location forms query
 the public Caltrans postmile layer directly and do not depend on these.
 
-### Roadway encroachment (technical form)
+### Roadway context
 
-The technical form's **Roadway encroachment** measurement (Lr and Wr) rebuilds the
-road from a centerline and the road inventory. The server fetches the centerline;
-nothing needs credentials.
+The server's roadway context rebuilds a road from a centerline and the road inventory.
+The technical form no longer uses it. The server fetches the centerline; nothing needs
+credentials.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -224,7 +232,7 @@ Read at build time (`npm run dev`, `npm run build`, or the web Docker image).
 | `VITE_API_BASE_URL` | `/api` | Backend address. Keep it same-origin: the session cookie is not sent to another origin. |
 | `VITE_DEV_API_TARGET` | `http://127.0.0.1:8000` | Where `npm run dev` proxies `/api`. |
 | `VITE_API_BASE` | — | Older alias, used only if `VITE_API_BASE_URL` is unset. |
-| `VITE_ARCGIS_API_KEY` | empty | Browser-safe ArcGIS key for the 3D terrain view. Optional in development; set it in production and restrict it to the site's origin in the ArcGIS dashboard. |
+| `VITE_ARCGIS_API_KEY` | empty | Browser-safe ArcGIS key for the website's maps. Optional in development, where maps fall back to OpenStreetMap's tile servers; required in production (see [map-licensing.md](map-licensing.md)) and restrict it to the site's origin in the ArcGIS dashboard. |
 | `VITE_CALTRANS_POSTMILE_LAYER_URL` | public Caltrans SHN Postmiles Tenth layer | Layer the "Report an incident" form uses to convert between coordinates and route/postmile. Change only to use a mirror. |
 | `VITE_CALTRANS_HIGHWAYS_URL` | empty | Optional Caltrans freeways and expressways map overlay. Empty: no overlay, and no request to that service. |
 | `VITE_GOOGLE_MAPS_EMBED_KEY` | empty | Optional. Shows Street View inside the report form; without it Street View opens in a new tab. Restrict the key to the site's domain. |

@@ -149,7 +149,7 @@ export function terrainSliceFromSampledPoints(
   noDataValue?: number | null,
 ): TerrainSliceData {
   if (sampledPoints.length !== grid.points.length) {
-    throw new Error("ArcGIS returned an unexpected terrain slice sample count.");
+    throw new Error("Got an unexpected number of terrain slice samples.");
   }
 
   const points = sampledPoints.map((point, index) => {

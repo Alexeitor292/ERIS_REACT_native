@@ -5,7 +5,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..deps import deny_public_only
+from ..deps import deny_public_only_unless_maintenance_reporter
 from ..storage import get_object_bytes
 
 router = APIRouter()
@@ -16,7 +16,7 @@ _ROAD_INVENTORY_BUCKET = "road-inventory"
 @router.get("/mobile-package/download")
 def download_current_mobile_package(
     db: Session = Depends(get_db),
-    _user=Depends(deny_public_only),
+    _user=Depends(deny_public_only_unless_maintenance_reporter),
 ):
     """Download the current published road-inventory package through ERIS.
 

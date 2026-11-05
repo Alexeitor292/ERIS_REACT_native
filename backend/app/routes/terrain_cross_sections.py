@@ -76,7 +76,7 @@ class CrossSectionSaveRequest(BaseModel):
     notes: str | None = None
     preferred_spacing_m: float | None = Field(default=None, gt=0)
     actual_spacing_m: float | None = Field(default=None, gt=0)
-    dem_source: str = Field(default="ARCGIS_WORLD_ELEVATION", min_length=1, max_length=128)
+    dem_source: str = Field(default="USGS_3DEP", min_length=1, max_length=128)
     control_points: list[CrossSectionPointRequest] = Field(min_length=2)
     profile_snapshot: dict[str, Any] | None = None
 

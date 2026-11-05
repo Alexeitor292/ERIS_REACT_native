@@ -68,12 +68,13 @@ def _me_id(client_db, token: str) -> int:
 def tokens(client_db):
     return {
         "admin": _login(client_db, "mock.admin@dot.ca.gov"),
-        "maintenance": _login(client_db, "mock.maintenance.crew@dot.ca.gov"),
-        "coordinator": _login(client_db, "mock.coordinator.d01@dot.ca.gov"),
+        "maintenance": _login(client_db, "mock.staff@dot.ca.gov"),
+        "field": _login(client_db, "mock.maintenance.crew@dot.ca.gov"),
+        "coordinator": _login(client_db, "mock.admin@dot.ca.gov"),
         # District 04, the district every assessment fixture below creates in.
         # mock.coordinator.d01@dot.ca.gov is district 01, so without this account the
         # coordinator-notification recipients resolve to nobody.
-        "coordinator04": _login(client_db, "mock.coordinator.d04@dot.ca.gov"),
+        "coordinator04": _login(client_db, "mock.admin@dot.ca.gov"),
         "officechief": _login(client_db, "mock.office.chief@dot.ca.gov"),
         "branchchief": _login(client_db, "mock.branch.chief@dot.ca.gov"),
         "engineer": _login(client_db, "mock.staff@dot.ca.gov"),
@@ -112,25 +113,19 @@ def _create_incident(client_db, token, *, district="04", county="Marin", route="
 
 
 class TestFieldWorkerIsolation:
-    def test_field_worker_creates_and_lists_only_own(self, client_db, tokens):
-        # Admin creates an incident the field worker should NOT see.
+    def test_field_worker_does_not_list_others_incidents(self, client_db, tokens):
         admin_incident = _create_incident(client_db, tokens["admin"], district="07", county="Los Angeles", route="5")
-        # Field worker creates their own.
-        own_incident = _create_incident(client_db, tokens["maintenance"])
-
-        resp = client_db.get("/incidents", headers=_auth(tokens["maintenance"]))
+        resp = client_db.get("/incidents", headers=_auth(tokens["field"]))
         assert resp.status_code == 200
-        ids_listed = {item["id"] for item in resp.json()["items"]}
-        assert own_incident in ids_listed
-        assert admin_incident not in ids_listed, "field worker must not see others' incidents"
+        assert admin_incident not in {item["id"] for item in resp.json()["items"]}
 
     def test_field_worker_cannot_view_others_incident(self, client_db, tokens):
         admin_incident = _create_incident(client_db, tokens["admin"], district="08", county="San Bernardino", route="15")
-        resp = client_db.get(f"/incidents/{admin_incident}", headers=_auth(tokens["maintenance"]))
+        resp = client_db.get(f"/incidents/{admin_incident}", headers=_auth(tokens["field"]))
         assert resp.status_code == 403
 
     def test_field_worker_cannot_list_assessments(self, client_db, tokens):
-        resp = client_db.get("/assessments", headers=_auth(tokens["maintenance"]))
+        resp = client_db.get("/assessments", headers=_auth(tokens["field"]))
         assert resp.status_code in (401, 403)
 
 

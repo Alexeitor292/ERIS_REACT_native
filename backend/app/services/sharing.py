@@ -19,7 +19,7 @@ from fastapi import HTTPException
 from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
-from . import notification_feed, org_tree
+from . import delegations, notification_feed, org_tree
 from .share_rules import APPROVAL, BRANCH, NOTICE, OFFICE, Place, Review, reviews_for
 
 OPEN = ("PENDING", "ACTIVE")
@@ -309,7 +309,7 @@ def _tell_the_chiefs(db: Session, share_id: int, *, actor_id: int) -> None:
         return
     story = _story(db, share)
     for review in db.execute(
-        text("SELECT unit_type, unit_id, kind FROM submission_share_reviews WHERE share_id = :id AND decision = 'PENDING'"),
+        text("SELECT id, unit_type, unit_id, kind FROM submission_share_reviews WHERE share_id = :id AND decision = 'PENDING'"),
         {"id": int(share_id)},
     ).mappings().all():
         approval = review["kind"] == APPROVAL
@@ -320,7 +320,8 @@ def _tell_the_chiefs(db: Session, share_id: int, *, actor_id: int) -> None:
             title="Sharing to approve" if approval else "A technical form was shared",
             body=f"{story['owner']} is sharing {story['form']} with {story['recipient']}."
             + ("" if approval else " You need not do anything; you may stop it."),
-            link="/my-work",
+            # An approval waits in My Work. A notice does not: this opens it to stop it, if they want to.
+            link="/my-work" if approval else f"/my-work?share={int(review['id'])}",
             actor_id=actor_id,
         )
 
@@ -337,6 +338,10 @@ def _activate_if_approved(db: Session, share_id: int, *, actor_id: int) -> None:
         _activate(db, share, actor_id=actor_id)
 
 
+def _owner_of(db: Session, submission_id: int) -> int | None:
+    return db.execute(text("SELECT created_by_user_id FROM submissions WHERE id = :sid"), {"sid": submission_id}).scalar()
+
+
 def decide(db: Session, *, actor: dict, share_id: int, review_id: int, decision: str, note: str | None) -> dict:
     """A chief approves, rejects (stops) or acknowledges. Does NOT commit."""
     share = _share(db, share_id, lock=True)
@@ -349,8 +354,9 @@ def decide(db: Session, *, actor: dict, share_id: int, review_id: int, decision:
         raise HTTPException(status_code=403, detail="Only the chief of this branch or office can decide this")
     if share["status"] not in OPEN:
         raise HTTPException(status_code=409, detail="This share has already ended")
+    delegations.refuse_own_work(db, share["recipient_user_id"], share["sharer_user_id"], _owner_of(db, int(share["submission_id"])))
     choice = str(decision or "").strip().upper()
-    note = (note or "").strip()[:1000] or None
+    note = delegations.signed_note(db, (note or "").strip()[:1000] or None, actor.get("full_name"))
 
     def record(value: str) -> None:
         db.execute(
@@ -544,3 +550,66 @@ def queue(db: Session, actor: dict) -> list[dict]:
         }
         for row in rows
     ]
+
+
+_FORM_COLUMNS = """sub.id, sub.created_by_user_id, sub.status, sub.title, sub.created_at, sub.submitted_at,
+                   g.district, g.county, g.route, g.post_mile"""
+_IN_PROGRESS = "sub.status IN ('DRAFT', 'REJECTED')"
+
+
+def _form(row: Any) -> dict:
+    return {
+        "id": int(row["id"]),
+        "created_by_user_id": int(row["created_by_user_id"]),
+        "status": row["status"],
+        "title": row["title"],
+        "district": row["district"],
+        "county": row["county"],
+        "route": row["route"],
+        "post_mile": row["post_mile"],
+        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        "submitted_at": row["submitted_at"].isoformat() if row["submitted_at"] else None,
+    }
+
+
+def my_forms(db: Session, user_id: int) -> dict[str, list[dict]]:
+    """Forms in progress that reach this person outside an assessment's own queue."""
+    shared = db.execute(
+        text(
+            f"""
+            SELECT {_FORM_COLUMNS}, s.created_at AS shared_at, COALESCE(u.full_name, u.email) AS shared_by
+              FROM submission_shares s
+              JOIN submissions sub ON sub.id = s.submission_id
+              JOIN users u ON u.id = s.sharer_user_id
+              LEFT JOIN submission_gisa g ON g.submission_id = sub.id
+             WHERE s.recipient_user_id = :uid AND s.status = 'ACTIVE' AND {_IN_PROGRESS}
+             ORDER BY s.created_at DESC, s.id DESC
+            """
+        ),
+        {"uid": int(user_id)},
+    ).mappings().all()
+    own = db.execute(
+        text(
+            f"""
+            SELECT {_FORM_COLUMNS}
+              FROM submissions sub
+              LEFT JOIN submission_gisa g ON g.submission_id = sub.id
+             WHERE sub.created_by_user_id = :uid AND {_IN_PROGRESS}
+               AND NOT EXISTS (SELECT 1 FROM assessments a WHERE a.submission_id = sub.id)
+               AND NOT EXISTS (SELECT 1 FROM assessment_submissions x WHERE x.submission_id = sub.id)
+             ORDER BY sub.created_at DESC, sub.id DESC
+            """
+        ),
+        {"uid": int(user_id)},
+    ).mappings().all()
+    return {
+        "shared": [
+            {
+                "submission": _form(row),
+                "shared_by": row["shared_by"],
+                "shared_at": row["shared_at"].isoformat() if row["shared_at"] else None,
+            }
+            for row in shared
+        ],
+        "own": [_form(row) for row in own],
+    }

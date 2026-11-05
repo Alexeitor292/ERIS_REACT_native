@@ -79,7 +79,7 @@ the office on the Senior Specialist route. Nobody else can approve.
 2. Open the form. Check the site, measurements, photos, actions and memos. The
    **Review and record** section shows the history.
 3. Decide:
-   - **Approve:** final. The district's coordinator is notified and the record
+   - **Approve:** final. The District Contact and whoever decided the report are told, and the record
      becomes readable by Guests.
    - **Request revision:** write what must change; the form goes back to the
      author, who resubmits.
@@ -96,6 +96,5 @@ the office on the Senior Specialist route. Nobody else can approve.
 ## Your organization
 
 On **Organization**, an Office Chief manages the office tree (Senior
-Specialists, branches, branch chiefs, staff) and the Maintenance Coordinators
-of the districts the office serves. A Branch Chief adds and removes Staff in
+Specialists, branches, branch chiefs, staff). A Branch Chief adds and removes Staff in
 their own branch. Details: [administration](administration.md#who-may-change-what).

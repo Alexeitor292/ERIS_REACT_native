@@ -508,9 +508,8 @@ export default function IncidentsTabScreen() {
   const isWorker = canReportIncident(roles);
   const canResolve = isStaff(roles);
   const isMaintenanceWorkerMobile =
-    (hasRole(roles, ROLES.STAFF) || hasRole(roles, ROLES.MAINTENANCE_CREW)) &&
+    (hasRole(roles, ROLES.STAFF) || hasRole(roles, ROLES.MAINTENANCE)) &&
     !(
-      hasRole(roles, ROLES.MAINTENANCE_COORDINATOR) ||
       hasRole(roles, ROLES.OFFICE_CHIEF) ||
       hasRole(roles, ROLES.BRANCH_CHIEF) ||
       isAdmin

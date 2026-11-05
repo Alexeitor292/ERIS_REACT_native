@@ -6,7 +6,7 @@ first field report to an approved geotechnical assessment.
 
 ```mermaid
 flowchart LR
-    crew["Maintenance Crew<br/>reports from the field"] --> coord["Maintenance Coordinator<br/>triages"]
+    crew["Maintenance<br/>reports from the field"] --> coord["The district's workflow<br/>reviews and decides"]
     coord --> oc["Office Chief<br/>routes the assessment"]
     oc --> author["Staff or Senior Specialist<br/>fills the GISA technical form"]
     author --> review["Branch or Office Chief<br/>reviews and approves"]

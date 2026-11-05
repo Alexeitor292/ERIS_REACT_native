@@ -56,12 +56,19 @@ SELECT p.user_id, r.id FROM org_user_profiles p
  WHERE u.email LIKE 'mock.%@dot.ca.gov' AND p.office_id IS NOT NULL;
 INSERT IGNORE INTO user_roles (user_id, role_id)
 SELECT DISTINCT c.user_id, r.id FROM org_coordinator_coverage c
-  JOIN users u ON u.id = c.user_id JOIN roles r ON r.name = 'MAINTENANCE_COORDINATOR'
+  JOIN users u ON u.id = c.user_id JOIN roles r ON r.name = 'MAINTENANCE'
  WHERE u.email LIKE 'mock.%@dot.ca.gov' AND c.is_active = 1;
 INSERT IGNORE INTO user_roles (user_id, role_id)
 SELECT DISTINCT c.user_id, r.id FROM org_district_crew c
-  JOIN users u ON u.id = c.user_id JOIN roles r ON r.name = 'MAINTENANCE_CREW'
+  JOIN users u ON u.id = c.user_id JOIN roles r ON r.name = 'MAINTENANCE'
  WHERE u.email LIKE 'mock.%@dot.ca.gov' AND c.is_active = 1;
 INSERT IGNORE INTO user_roles (user_id, role_id)
 SELECT u.id, r.id FROM users u JOIN roles r ON r.name = 'GUEST'
  WHERE u.email LIKE 'mock.%@dot.ca.gov' AND NOT EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = u.id);
+
+-- The upgrade gives every district with mock people on the old lists a starter
+-- workflow. Local work and the tests start from none: each sets up what it needs.
+DELETE FROM maintenance_workflow_events;
+DELETE FROM maintenance_workflows;
+UPDATE org_coordinator_coverage SET is_active = 0;
+UPDATE org_district_crew SET is_active = 0;

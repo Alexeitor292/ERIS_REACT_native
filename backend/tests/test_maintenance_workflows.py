@@ -55,6 +55,11 @@ def db(monkeypatch):
         "CREATE TABLE maintenance_workflow_events (id INTEGER PRIMARY KEY AUTOINCREMENT, district TEXT, incident_id INT, actor_user_id INT, action TEXT, step_index INT, notes TEXT, metadata_json TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)",
         "CREATE TABLE incidents (id INTEGER PRIMARY KEY, reporter_user_id INT, title TEXT, district TEXT, description TEXT, status TEXT, updated_at DATETIME, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)",
         "CREATE TABLE event_groups (id INTEGER PRIMARY KEY, title TEXT, district TEXT, status TEXT)",
+        "CREATE TABLE org_user_profiles (user_id INT, office_id INT, tree_position TEXT, branch_id INT)",
+        "CREATE TABLE org_branches (id INTEGER PRIMARY KEY, is_active INT)",
+        "CREATE TABLE roles (id INTEGER PRIMARY KEY, name TEXT)",
+        "CREATE TABLE user_roles (user_id INT, role_id INT)",
+        "INSERT INTO roles (name) VALUES ('MAINTENANCE'), ('GUEST'), ('ADMIN'), ('STAFF')",
     ]
     with Session(engine) as session:
         for statement in schema:
@@ -90,7 +95,7 @@ def act(db, uid, action, **kwargs):
 
 def test_managers_are_district_scoped_not_titles(db, plan):
     with pytest.raises(HTTPException) as exc:
-        publish(db, plan, actor=user(1, ["MAINTENANCE_COORDINATOR"]))
+        publish(db, plan, actor=user(1, ["MAINTENANCE"]))
     assert exc.value.status_code == 403
     publish(db, plan)
     assert publish(db, plan, revision=1, actor=user(1))["revision"] == 2
@@ -131,7 +136,7 @@ def test_invalid_paths_fail_before_publication(plan, change):
 def test_report_permission_is_title_independent(db, plan):
     publish(db, plan)
     assert mw.authorize_report(db, user(2), "3")
-    for actor in [user(6), user(9, ["STAFF"]), user(9, ["MAINTENANCE_CREW"])]:
+    for actor in [user(6), user(9, ["STAFF"]), user(9, ["MAINTENANCE"])]:
         with pytest.raises(HTTPException):
             mw.authorize_report(db, actor, "03")
     assert mw.authorize_report(db, user(9, ["STAFF"]), "04") is None
@@ -143,7 +148,7 @@ def test_reporters_cannot_read_other_reports_and_notifications_do_not_grant_acti
     assert mw.can_read(user(2), incident, workflow)
     assert not mw.can_read(user(3), incident, workflow)
     assert mw.can_read(user(8), incident, workflow)
-    assert not mw.can_read(user(9, ["MAINTENANCE_COORDINATOR"]), incident, workflow)
+    assert not mw.can_read(user(9, ["MAINTENANCE"]), incident, workflow)
     with pytest.raises(HTTPException):
         mw.transition(plan, workflow["state"], 8, "APPROVE")
     assert db.info["notices"][0][0] == {4, 5, 8}
@@ -196,6 +201,8 @@ def test_request_information_and_resubmission_restart_reviews(db, plan):
     assert not result["state"]["waiting_reporter"]
     assert db.execute(text("SELECT description FROM incidents WHERE id = 10")).scalar() == "Added road condition"
     assert any(2 in recipients for recipients, _ in db.info["notices"])
+    # Every notice opens the report in My Work, where maintenance reports wait.
+    assert {notice["link"] for _, notice in db.info["notices"]} == {"/my-work?maintenance=10"}
 
 
 def test_stale_action_and_completed_run_refuse_writes(db, plan, monkeypatch):
@@ -262,7 +269,7 @@ def test_legacy_coordinator_action_cannot_bypass_workflow(db, plan):
     from app.routes.assessments import triage_incident
     from app.schemas.common import IncidentTriageRequest
     with pytest.raises(HTTPException) as exc:
-        triage_incident(IncidentTriageRequest(disposition="NO_ASSESSMENT_REQUIRED"), 10, db, user(9, ["MAINTENANCE_COORDINATOR"]))
+        triage_incident(IncidentTriageRequest(disposition="NO_ASSESSMENT_REQUIRED"), 10, db, user(9, ["MAINTENANCE"]))
     assert exc.value.status_code == 409
     assert mw.run(db, 10)["outcome"] is None
 
@@ -271,9 +278,19 @@ def test_only_assigned_records_appear_in_queue(db, plan):
     start(db, plan)
     assert len(routes.work(db, user(2))["items"]) == 1
     assert routes.work(db, user(3))["items"] == []
-    assert routes.work(db, user(9, ["MAINTENANCE_COORDINATOR"]))["items"] == []
+    assert routes.work(db, user(9, ["MAINTENANCE"]))["items"] == []
     assert routes.work(db, user(4))["items"][0]["my_turn"]
     assert not routes.work(db, user(8))["items"][0]["my_turn"]
+    assert routes.work(db, user(2))["items"][0]["reported_by_me"]
+    assert not routes.work(db, user(4))["items"][0]["reported_by_me"]
+
+
+def test_assigned_people_say_true_or_false_because_the_iphone_cannot_read_0_or_1(db, plan):
+    start(db, plan)
+    people = routes.detail(10, db, user(4))["assigned"]
+    assert people and all(person["is_active"] is True for person in people)
+    db.execute(text("UPDATE users SET is_active = 0 WHERE id = :id"), {"id": people[0]["id"]})
+    assert routes.detail(10, db, user(4))["assigned"][0]["is_active"] is False
 
 
 def test_notification_only_workflow_members_have_their_own_feed(db, plan):
@@ -292,3 +309,49 @@ def test_old_tree_endpoint_cannot_restore_title_based_access(db, plan):
     with pytest.raises(HTTPException) as exc:
         _ensure_workflow_tree_access(user(9, ["OFFICE_CHIEF"]), incident, db=db)
     assert exc.value.status_code == 404
+
+
+def held(db, uid):
+    return set(db.execute(text(
+        "SELECT r.name FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = :u"
+    ), {"u": uid}).scalars())
+
+
+def test_being_in_a_workflow_is_what_makes_someone_maintenance(db, plan):
+    publish(db, plan)
+    assert held(db, 2) == {"MAINTENANCE"}, "a reporter"
+    assert held(db, 6) == {"MAINTENANCE"}, "a decision maker: the same one role"
+    assert held(db, 8) == {"MAINTENANCE"}, "someone only kept informed"
+
+
+def test_leaving_the_last_workflow_ends_it(db, plan):
+    publish(db, plan)
+    smaller = copy.deepcopy(plan)
+    smaller["duties"][3]["user_ids"] = []
+    smaller["notify_duty_ids"] = []
+    publish(db, smaller, revision=1)
+    assert held(db, 8) == {"GUEST"}
+    assert held(db, 2) == {"MAINTENANCE"}
+
+
+def test_someone_with_a_report_still_open_keeps_the_role(db, plan):
+    start(db, plan)
+    smaller = copy.deepcopy(plan)
+    smaller["duties"][2]["user_ids"] = [7]
+    publish(db, smaller, revision=1)
+    assert held(db, 6) == {"MAINTENANCE"}, "the open report still waits on them"
+
+
+def test_maintenance_cannot_report_where_there_is_no_workflow(db):
+    with pytest.raises(HTTPException) as exc:
+        mw.authorize_report(db, user(2, ["MAINTENANCE"]), "07")
+    assert exc.value.status_code == 403
+    assert mw.authorize_report(db, user(3, ["STAFF"]), "07") is None
+    assert mw.authorize_report(db, user(1, ["ADMIN"]), "07") is None
+
+
+def test_maintenance_reports_only_with_reporting_duty(db, plan):
+    publish(db, plan)
+    assert mw.authorize_report(db, user(2, ["MAINTENANCE"]), "03")
+    with pytest.raises(HTTPException):
+        mw.authorize_report(db, user(6, ["MAINTENANCE"]), "03")

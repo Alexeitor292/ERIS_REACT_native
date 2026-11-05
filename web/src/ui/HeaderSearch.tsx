@@ -17,7 +17,7 @@ import { useNavigate } from "react-router-dom";
 
 import { api } from "../api/client";
 import { listAssessments } from "../api/assessments";
-import type { MaintenancePayload, TreePayload, TreePerson } from "../api/orgTree";
+import type { TreePayload, TreePerson } from "../api/orgTree";
 import { districtWords, search, type SearchEntry, type SearchKind } from "./searchModel";
 
 /**
@@ -113,13 +113,6 @@ function useSearchIndex(active: boolean, pages: SearchPage[], records: boolean):
             if (b.chief) place(b.chief, `${branchName}, ${officeName}`);
             b.staff.forEach((p) => place(p, `${branchName}, ${officeName}`));
           }
-        }
-      }),
-      api<MaintenancePayload>("/org/maintenance").then((lists) => {
-        for (const d of lists.districts) {
-          const where = `District ${Number(d.district)}`;
-          d.coordinators.forEach((p) => addPerson(p, "Maintenance Coordinator", where, "/organization?tab=maintenance"));
-          d.crew.forEach((p) => addPerson(p, "Maintenance Crew", where, "/organization?tab=maintenance"));
         }
       }),
     ];

@@ -15,6 +15,7 @@ import {
   canReportIncident,
   canTriage,
   hasRole,
+  hasMaintenanceDuties,
   hasWorkQueue,
   isAdmin,
   isAssessmentAuthor,
@@ -28,8 +29,7 @@ import {
   roleLabel,
 } from "./roleModel.ts";
 
-const CREW = ["MAINTENANCE_CREW"];
-const COORDINATOR = ["MAINTENANCE_COORDINATOR"];
+const MAINTENANCE = ["MAINTENANCE"];
 const OFFICE_CHIEF = ["OFFICE_CHIEF"];
 const BRANCH_CHIEF = ["BRANCH_CHIEF"];
 const SENIOR_SPECIALIST = ["SENIOR_SPECIALIST"];
@@ -37,18 +37,18 @@ const STAFF = ["STAFF"];
 const GUEST = ["GUEST"];
 
 const RETIRED = [
-  "MAINTENANCE", "MAINTENANCE_FIELD_WORKER", "MAINT_COORDINATOR", "GEOTECH_OFFICE_CHIEF",
+  "MAINTENANCE_CREW", "MAINTENANCE_COORDINATOR", "MAINTENANCE_FIELD_WORKER", "MAINT_COORDINATOR", "GEOTECH_OFFICE_CHIEF",
   "GEOTECH_BRANCH_CHIEF", "GEOTECH_ENGINEER", "GEOTECH_SENIOR_ENGINEER", "FIELD_WORKER",
   "CALTRANS_VIEWER", "REVIEWER",
 ];
 
-test("the role set is the owner's seven roles and the Administrator, one code each", () => {
+test("the role set is the owner's six roles and the Administrator, one code each", () => {
   assert.deepEqual([...ALL_ROLE_NAMES].sort(), [
-    "ADMIN", "BRANCH_CHIEF", "GUEST", "MAINTENANCE_COORDINATOR", "MAINTENANCE_CREW",
+    "ADMIN", "BRANCH_CHIEF", "GUEST", "MAINTENANCE",
     "OFFICE_CHIEF", "SENIOR_SPECIALIST", "STAFF",
   ]);
   assert.deepEqual(ALL_ROLE_NAMES.map(roleLabel), [
-    "Maintenance Crew", "Maintenance Coordinator", "Office Chief", "Branch Chief",
+    "Maintenance", "Office Chief", "Branch Chief",
     "Senior Specialist", "Staff", "Guest", "Administrator",
   ]);
 });
@@ -92,7 +92,7 @@ test("assessment authors are Staff, the Senior Specialist and admin", () => {
   assert.equal(isAssessmentAuthor(["ADMIN"]), true);
   assert.equal(isAssessmentAuthor(OFFICE_CHIEF), false);
   assert.equal(isAssessmentAuthor(BRANCH_CHIEF), false);
-  assert.equal(isAssessmentAuthor(COORDINATOR), false);
+  assert.equal(isAssessmentAuthor(MAINTENANCE), false);
   assert.equal(isAssessmentAuthor(undefined), false);
 });
 
@@ -108,12 +108,12 @@ test("both routing choices belong to the office chief and admin", () => {
   }
 });
 
-test("field reports are filed by the crew, Staff and administrators — as the server allows", () => {
-  assert.equal(canReportIncident(CREW), true);
+test("Staff and administrators report; Maintenance reports when a workflow gives them that duty", () => {
   assert.equal(canReportIncident(STAFF), true);
   assert.equal(canReportIncident(["ADMIN"]), true);
+  assert.equal(canReportIncident(MAINTENANCE), false);
+  assert.equal(canReportIncident(MAINTENANCE, true), true);
   assert.equal(canReportIncident(SENIOR_SPECIALIST), false);
-  assert.equal(canReportIncident(COORDINATOR), false);
   assert.equal(canReportIncident(OFFICE_CHIEF), false);
   assert.equal(canReportIncident(BRANCH_CHIEF), false);
   assert.equal(canReportIncident(GUEST), false);
@@ -146,8 +146,8 @@ test("a guest who also holds an operational role keeps that role's access", () =
   assert.equal(hasWorkQueue(chiefAndGuest), true);
   assert.equal(canDelegateBranch(chiefAndGuest), true);
   assert.equal(landingPathFor(chiefAndGuest), "/my-work");
-  // A crew member who is also a guest is likewise not narrowed to the public record.
-  assert.equal(isPublicOnly([...CREW, ...GUEST]), false);
+  // A Maintenance person who is also a guest is likewise not narrowed to the public record.
+  assert.equal(isPublicOnly([...MAINTENANCE, ...GUEST]), false);
   assert.equal(isPublicOnly([]), false);
   assert.equal(isPublicOnly(undefined), false);
 });
@@ -159,17 +159,27 @@ test("the record route gates admit the guest and the operational surface does no
   assert.equal(admits(OPERATIONAL_ROLE_NAMES, GUEST), false);
   assert.equal(admits(WORK_QUEUE_ROLE_NAMES, GUEST), false);
   assert.equal(admits(WORKFORCE_ROLE_NAMES, GUEST), false);
-  // The crew reaches a record but not an assessment: the server refuses them
+  // Maintenance reaches a record but not an assessment: the server refuses them
   // assessments, so the client must not offer them either.
-  assert.equal(admits(RECORD_READ_ROLE_NAMES, CREW), true);
-  assert.equal(admits(ASSESSMENT_READ_ROLE_NAMES, CREW), false);
+  assert.equal(admits(RECORD_READ_ROLE_NAMES, MAINTENANCE), true);
+  assert.equal(admits(ASSESSMENT_READ_ROLE_NAMES, MAINTENANCE), false);
   assert.equal(admits(ASSESSMENT_READ_ROLE_NAMES, STAFF), true);
 });
 
-test("the Maintenance Crew stays out of the operational surface", () => {
-  assert.equal(isMaintenanceOnly(CREW), true);
-  assert.equal(isOperationalUser(CREW), false);
-  assert.equal(isMaintenanceOnly([...CREW, ...SENIOR_SPECIALIST]), false);
+test("Maintenance stays out of the operational surface", () => {
+  assert.equal(isMaintenanceOnly(MAINTENANCE), true);
+  assert.equal(isOperationalUser(MAINTENANCE), false);
+  assert.equal(isMaintenanceOnly([...MAINTENANCE, ...SENIOR_SPECIALIST]), false);
   assert.equal(isAdmin(SENIOR_SPECIALIST), false);
   assert.equal(isAdmin(["ADMIN"]), true);
+});
+
+test("district maintenance duties open My Work, whatever the role", () => {
+  const duties = { maintenance_districts: [{ district: "04", report: true, manage: false }] };
+  assert.equal(hasMaintenanceDuties(duties), true);
+  assert.equal(hasMaintenanceDuties({ maintenance_districts: [] }), false);
+  assert.equal(hasMaintenanceDuties(null), false);
+  assert.equal(hasWorkQueue(GUEST, true), true);
+  assert.equal(landingPathFor(GUEST, true), "/my-work");
+  assert.equal(landingPathFor(GUEST, false), "/incidents");
 });

@@ -11,6 +11,7 @@ from ..db import get_db
 from ..rate_limit import limit_sign_in
 from ..deps import current_session, get_current_user
 from ..schemas.common import LoginRequest
+from ..services import delegations
 from ..services import org_directory
 from ..services import maintenance_workflows
 from ..sessions import (
@@ -146,6 +147,8 @@ def me(user=Depends(get_current_user), db: Session = Depends(get_db)):
     return {
         **user,
         "maintenance_districts": maintenance_workflows.summary(db, int(user["id"])),
+        # For whom the person really signed in may act, even while acting for one of them.
+        "acting_options": delegations.acting_options(db, int(user["acting"]["user_id"] if user.get("acting") else user["id"])),
         "org": {
             "office_id": org.get("office_id"),
             "office_code": org.get("office_code"),

@@ -1,7 +1,7 @@
 # Organization model — administrator guide
 
-Who is in which office and branch, which districts an office serves, who
-coordinates each district and who is on its crew. **Where a person sits decides
+Who is in which office and branch, which districts an office serves, and who has
+which part in each district's maintenance workflow. **Where a person sits decides
 their role**: nobody is given a work role any other way. All of it is data edited
 on the **Organization** page of the web app, not constants in the code or rows
 somebody writes in SQL.
@@ -18,7 +18,7 @@ and how routing uses this data in [workflows.md](../architecture/workflows.md).
 | **Office** | A Geotechnical Services office — *Office of Geotechnical Design West*. Has a permanent ERIS **code** (`WEST`), a unit number (`59-315`), a home city and district, and the districts it serves. This is what an assessment is routed to. | Organization › GeoTech offices › *Edit office* / *New office* (administrators) |
 | **Office tree** | One per office. The office chief(s) at the top; hanging from them the **senior specialists** (single leaves) and the **branches**; under each branch its chief and its staff. | Organization › GeoTech offices |
 | **Branch** | A supervised group inside an office, led by a branch chief — "Branch C", or the printed name from the chart. | The office's tree: *+ Branch*, and the branch's ⋯ menu |
-| **District lists** | For each Caltrans district, its **Maintenance Coordinators** (one marked Primary, notified first) and its **Maintenance Crew**. | Organization › Maintenance |
+| **District workflow** | For each Caltrans district, who reports, reviews and decides. [District maintenance workflows](maintenance-workflows.md). | Organization › Maintenance |
 | **Details** | Classification, position number, home city and district, and availability. Shown in pickers; never a role. | A person's card in the tree › *Details and availability* |
 
 Two names per office, used deliberately: the **full name** ("Office of
@@ -34,8 +34,7 @@ office selector and receipts. Fill both in.
 | Leading a branch | Branch Chief |
 | A leaf under the office chief | Senior Specialist |
 | Under a branch | Staff |
-| On a district's coordinator list | Maintenance Coordinator |
-| On a district's crew list | Maintenance Crew |
+| Named in a district's maintenance workflow | Maintenance |
 | Nowhere | Guest (read-only) |
 
 **No role is ever held without the place that gives it.** Somebody placed
@@ -71,8 +70,8 @@ once: the next request they make is judged by it.
 | **Administrator** | Everything, in every office: create and edit offices, name office chiefs, move people between offices, the maintenance lists, and who is an administrator. |
 | **Office chief** | Their own office's tree: add senior specialists, add, rename and retire branches, name or replace branch chiefs, add staff to any branch, move people within the office, remove anybody except office chiefs. |
 | **Branch chief** | Add staff to their own branch (people who sit nowhere yet) and remove them. Moving somebody from elsewhere in the office is the office chief's job. |
-| **Office chief, district lists** | Add and remove the Maintenance Coordinators of any district, and choose the Primary. |
-| **Maintenance coordinator** | Add and remove the Maintenance Crew of their own district(s). |
+| **Administrator** | Start a district's first maintenance workflow, and name who manages it. |
+| **Workflow manager** | Change their own district's workflow. |
 
 Everybody may edit their own details. **Everybody with access to ERIS, guests
 included, can see the whole organization:** every office's tree and every
@@ -119,15 +118,13 @@ remove them first. Retiring takes its chief out with it (a guest until placed
 again), stops it being offered as a destination, and leaves every assessment
 already routed to it untouched.
 
-### Keep the maintenance lists
+### Set up the district workflows
 
-Organization › Maintenance lists Districts 1 to 12. Open one for its
-**Maintenance Coordinators** and **Maintenance Crew**, each with *Add*. A
-district may have several coordinators; the first one added is **Primary**
-(notified first) and *Make primary* changes it. A district with no coordinator is
-flagged in red — *reports filed there notify nobody* — fix those first. Removing
-somebody deactivates the row rather than deleting it, so who covered what last
-quarter is still answerable.
+Organization › Maintenance lists Districts 1 to 12, with a green dot on those set up.
+A district with no workflow has no Maintenance reporting, and its reports wait on an
+administrator, so set those up first. [District maintenance workflows](maintenance-workflows.md)
+explains the page. Districts that had people on the old coordinator and crew lists were
+given a starting workflow when ERIS moved to one Maintenance role: check each one.
 
 ### Availability and details
 
@@ -145,6 +142,29 @@ The trees arrived after people already held roles. `20260926_org_tree` placed
 everyone it could; `20260930_roles_from_org` then made every account's roles
 exactly what its place gives (plus Administrator). Anybody still placed nowhere
 is a Guest: find them with the + on the tree and place them.
+
+---
+
+## When someone takes over a role
+
+Open work does not follow a person's replacement by itself, except where it needs
+nothing to move:
+
+| Who changed | What happens to their open work |
+|---|---|
+| **Office chief** | Nothing to move: routing and Senior Specialist review go by office, so the new chief has it all at once. Their share reviews follow the place too. |
+| **Branch chief** | Share reviews follow the place. Assessments stay named to the former chief until moved, because review authority is that one name: they appear under **Move work** in the office chief's My Work, flagged as left by someone who moved on. |
+| **Senior Specialist** | Flagged the same way for the office chief. Only Draft and Revision requested work moves, since what is submitted is the office's to review. |
+| **Staff** | Flagged for the branch chief the work was handed to, who can also look at anyone's load and spread it around. |
+
+**Move work** is in My Work. An office chief sees it only when someone who moved on
+left work that needs them; a branch chief can always see the Staff on what was
+handed to them. A chief ticks some or all of one person's work and chooses who takes it: spreading it
+around is several of these, giving it all to the new person is one. Each move is an
+ordinary hand-off with its own checks, timeline row and notice, so the technical
+form, its photos and its history stay with the assessment and the new person can
+edit them. One refused move (someone in another branch with no reason recorded, for
+instance) does not undo the others, and the answer says which and why.
 
 ---
 
@@ -187,7 +207,12 @@ an account that sits in no office tree and on no district list is a guest.
   Incidents. No My Work, no Mission Center, no Incident Groups, no Terrain, no
   administration, and no "Report an incident".
 - There is no mobile guest surface. A guest who signs in to ERIS Mobile is told
-  the app is for field and office staff and to use ERIS on the web.
+  the app is for people placed in the organization and to use ERIS on the web. The
+  server refuses a native client for anyone placed nowhere, with no maintenance duty
+  and not an administrator, on every request (`services/app_access.py`), so a move
+  out of the organization takes effect at once. The app reads the person's place
+  again when it comes back and after each round of catching up, so its tabs and
+  queue follow a change of role without restarting.
 - A guest is in **no** picker and **no** notification list, and holds no
   authority anywhere.
 - Placing a guest anywhere ends their guest status: the place gives its role instead.
@@ -214,12 +239,15 @@ has to re-derive why ERIS behaves this way.
    cannot be inferred at all.
 2. **Policy and Support** are seeded as non-routing units. Confirm, and say
    whether Support should appear in the admin UI before its chart exists.
-3. **Assigning out of branch** is allowed with a recorded reason; assigning out
-   of **office** is refused outright. A hard refusal on branch would be the first
-   place the org model tells a chief covering a short-staffed branch "no".
-4. **Dual membership and acting assignments with dates** are not modelled. The
-   availability marking covers "temporarily elsewhere"; genuinely belonging to
+3. **Assigning out of branch** is not allowed. An office chief is offered only the
+   branch chiefs and Senior Specialists of the assessment's office, and a branch
+   chief only the Staff of the branch it was handed to; the server refuses anyone
+   else. For someone elsewhere, the office chief hands the assessment to their
+   branch chief, or moves the person.
+4. **Dual membership** is not modelled. Someone covering for a colleague for a
+   run of dates uses Out of office ([roles-and-identity.md](../security/roles-and-permissions.md#special-permits));
+   the availability marking covers "temporarily elsewhere"; genuinely belonging to
    two branches would need membership rows with validity periods.
-5. **Who supervises Maintenance Crew members, and whether that supervisor
-   sees their crew's reports.** The model records a supervisor; no visibility
+5. **Who supervises Maintenance people, and whether that supervisor
+   sees their reports.** The model records a supervisor; no visibility
    rule uses it yet.

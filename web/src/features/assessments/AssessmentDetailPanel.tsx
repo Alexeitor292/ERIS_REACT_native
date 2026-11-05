@@ -24,21 +24,24 @@ import { loadOfficeDirectory } from "../../api/org";
 import type { Incident, Submission } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { SubmissionStatusBadge } from "../submissions/SubmissionDetailPrimitives";
+import SubmitConfirmDialog from "../submissions/SubmitConfirmDialog";
 import { buildSubmissionDisplayTitle } from "../../utils/submissionLabel";
 import { canAssignEngineer, canDelegateBranch, isAdmin, isSeniorSpecialist, isStaff } from "../../utils/roleModel";
 import PersonPicker from "./PersonPicker";
 import { branchLabelOf, isOutOfBranchChoice, placeLabel, selectedPerson, buildPickerSections } from "./personPickerModel";
 import {
   assessmentBranchName,
-  assessmentEventLabel,
-  assessmentOfficeName,
   assessmentPermissions,
-  assessmentStateLabel,
+  assessmentPlace,
   assessmentStateLabelFor,
   assessmentTone,
   assignmentRoleLabel,
-  humanizeCode,
+  eventTitle,
   isActionable,
+  nextStepLine,
+  reviewerName,
+  waitingWho,
+  withoutTrailingDate,
   stepOwnership,
   workActionLabel,
   latestSubmissionId,
@@ -46,10 +49,26 @@ import {
   pipelineFor,
   pipelineIndex,
   submissionIdsOf,
-  waitingOn,
   type OfficeNameLookup,
   type Tone,
 } from "./assessmentModel";
+
+const shortDateFormatter = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
+
+function shortDate(value: string | null | undefined) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : shortDateFormatter.format(parsed);
+}
+
+/** Where a form is, as a headline: "07-LA-002-38.00". Null when it has no location yet. */
+function formLocation(submission: Submission | undefined): string | null {
+  if (!submission) return null;
+  const title = buildSubmissionDisplayTitle({
+    id: submission.id, district: submission.district, county: submission.county, route: submission.route, post_mile: submission.post_mile,
+  });
+  return title.includes("?") ? null : title;
+}
 
 const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
   year: "numeric",
@@ -167,15 +186,14 @@ export function Pipeline({ assessment }: { assessment: Pick<AssessmentDetail["as
   );
 }
 
-function Card({ title, hint, actions, children, bodyClassName = "p-4" }: { title: ReactNode; hint?: ReactNode; actions?: ReactNode; children: ReactNode; bodyClassName?: string }) {
+function Card({ title, actions, children }: { title: ReactNode; actions?: ReactNode; children: ReactNode }) {
   return (
-    <section className="overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--panel)]">
-      <div className="flex flex-wrap items-center gap-2.5 border-b border-[var(--line)] bg-[var(--panel-soft)] px-4 py-3">
-        <h3 className="text-[13px] font-semibold">{title}</h3>
-        {hint ? <span className="text-xs text-muted">{hint}</span> : null}
+    <section className="rounded-xl border border-[var(--line)] bg-[var(--panel)] px-5 py-4">
+      <div className="flex flex-wrap items-center gap-2.5">
+        <h3 className="text-[15px] font-bold">{title}</h3>
         {actions ? <div className="ml-auto flex flex-wrap items-center gap-1.5">{actions}</div> : null}
       </div>
-      <div className={bodyClassName}>{children}</div>
+      <div className="mt-2.5">{children}</div>
     </section>
   );
 }
@@ -254,6 +272,7 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
   const [context, setContext] = useState<IncidentContext>({ incident: null, eventGroupId: null });
   const [busy, setBusy] = useState(false);
   const [notes, setNotes] = useState("");
+  const [confirmingSubmit, setConfirmingSubmit] = useState(false);
   const [branchList, setBranchList] = useState<{ groups: PickerGroup[]; items: RoutingUserOption[] }>(EMPTY_OPTIONS);
   const [seniorEngineerList, setSeniorEngineerList] = useState<{ groups: PickerGroup[]; items: RoutingUserOption[] }>(EMPTY_OPTIONS);
   const [engineerOptions, setEngineerOptions] = useState<{ groups: PickerGroup[]; items: AssignmentUserOption[] }>(EMPTY_OPTIONS);
@@ -377,54 +396,54 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
   const availableConsulted = consultedOptions.filter((option) => !assignedIds.has(option.id));
   const revision = assessment.state === "REVISION_REQUESTED";
   const { officeNames, isRetiredBranch } = useOrgLabels();
-  const officeName = assessmentOfficeName(assessment, officeNames);
   const branchName = assessmentBranchName(assessment);
   const branchRetired = isRetiredBranch(assessment.routed_branch_id);
-  // The office in "an office chief of … reviews this" comes from the snapshot,
-  // and from the live directory only for a record routed before it existed.
-  const next = waitingOn(assessment, assignments, officeNames);
+  const nextLine = nextStepLine(assessment, latestId);
   // A Staff member from another branch is allowed WITH a recorded reason, and
   // refused without one — so the warning appears before the refusal, not after.
   const chosenStaff = selectedPerson(buildPickerSections(engineerOptions.groups, engineerOptions.items), engineerId);
   const staffOutOfBranch = isOutOfBranchChoice(chosenStaff, assessment.routed_branch_id);
-  const incidentTitle = context.incident?.title ? `Incident #${assessment.incident_id} · ${context.incident.title}` : `Incident #${assessment.incident_id} technical assessment`;
+  const latestForm = latestId != null ? submissionsById.get(latestId) : undefined;
+  const headline = (context.incident?.title ? withoutTrailingDate(context.incident.title) : null)
+    ?? formLocation(latestForm)
+    ?? `Incident #${assessment.incident_id}`;
+  const author = assignments.find((assignment) => assignment.assignment_role === "ENGINEER" || assignment.assignment_role === "SENIOR_ENGINEER");
+  const assignedName = assessment.assigned_user_name || author?.full_name || null;
+  const reviewer = reviewerName(assessment);
+  const others = assignments.filter((assignment) => assignment !== author);
   const approver = [...events].reverse().find((event) => event.event_type === "APPROVED");
   const approverName = approver?.actor_name || approver?.actor_email || null;
 
   return (
     <div className="grid gap-3.5">
-      <section className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4">
+      <section className="rounded-xl border border-[var(--line)] bg-[var(--panel)] px-5 py-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">Assessment #{assessment.id}</div>
-            <h2 className="mt-0.5 text-lg font-semibold leading-snug">{incidentTitle}</h2>
+            <div className="text-xs font-semibold text-muted">Assessment #{assessment.id}</div>
+            <h2 className="mt-0.5 text-2xl font-bold leading-tight">{headline}</h2>
             {/* Office and branch by NAME, from the routing snapshot: a rename or a
                 retired branch must not rewrite what this record says (design §3.5). */}
             <div className="mt-1 text-[13px] text-muted">
-              {officeName}
-              {branchName ? <> · {branchName}{branchRetired ? <RetiredBadge /> : null}</> : null}
-              {" · "}District {assessment.district ?? "—"} · Updated {formatTimestamp(assessment.updated_at)}
+              {assessmentPlace(assessment, officeNames)}
+              {branchName && branchRetired ? <RetiredBadge /> : null}
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <AssessmentStateBadge state={assessment.state} routingPath={assessment.routing_path} />
+          <div className="flex flex-wrap items-center gap-3.5 pt-1 text-[13px] font-semibold">
+            <Link to={`/incidents/${assessment.incident_id}`} className="text-[var(--brand-ink)] hover:underline">Incident #{assessment.incident_id}</Link>
+            {context.eventGroupId != null ? <Link to={`/mission-center/${context.eventGroupId}/${assessment.incident_id}`} className="text-[var(--brand-ink)] hover:underline">Map</Link> : null}
+            {context.eventGroupId != null ? <Link to={`/incident-groups/${context.eventGroupId}`} className="text-[var(--brand-ink)] hover:underline">Group #{context.eventGroupId}</Link> : null}
           </div>
-        </div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Link to={`/incidents/${assessment.incident_id}`} className={btn}>Open incident</Link>
-          {context.eventGroupId != null ? <Link to={`/mission-center/${context.eventGroupId}/${assessment.incident_id}`} className={btn}>View on map</Link> : null}
-          {context.eventGroupId != null ? <Link to={`/incident-groups/${context.eventGroupId}`} className={btn}>Incident Group #{context.eventGroupId}</Link> : null}
         </div>
         <Pipeline assessment={assessment} />
         {assessment.office_override_reason ? <div className="mt-3 rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] p-3 text-[13px]"><b>Routing override:</b> {assessment.office_override_reason}</div> : null}
       </section>
 
-      {!next ? (
+      {!nextLine ? (
         <div className="rounded-xl border border-[color:color-mix(in_oklab,var(--good)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--good)_10%,transparent)] px-4 py-3 text-sm text-[var(--good)]">
           {assessment.state === "APPROVED" ? (
-            <><b>Assessment complete.</b> Approved {formatTimestamp(assessment.approved_at)}{approverName ? ` by ${approverName}` : ""}.</>
+            <><b>Complete.</b> Approved {formatTimestamp(assessment.approved_at)}{approverName ? ` by ${approverName}` : ""}.</>
           ) : (
-            <><b>Signed off</b> {formatTimestamp(assessment.finalized_at)} (legacy). Approval completes an assessment now.</>
+            <><b>Signed off</b> {formatTimestamp(assessment.finalized_at)}.</>
           )}
         </div>
       ) : (
@@ -437,37 +456,25 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
             background: `color-mix(in oklab, ${revision ? "var(--bad)" : "var(--brand)"} 6%, var(--panel))`,
           }}
         >
-          <div className="flex flex-wrap items-baseline gap-2">
-            <span className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: revision ? "var(--bad)" : "var(--brand)" }}>Next step</span>
-            <span className="text-[15px] font-semibold">Waiting on {next.who}</span>
-          </div>
-          <p className="mt-1.5 text-sm">{next.text}</p>
-
-          {mode === "record" ? (
-            ownership === "NONE" ? (
-              <p className="mt-2.5 text-[13px] text-muted">Actions for this step are performed from My Work by the responsible role.</p>
-            ) : (
-              // The buttons go to the action itself: the form to fill out, or
-              // this assessment opened in My Work with its step in view.
-              <div className="mt-3 grid gap-2">
-                <p className="text-[13px]">
-                  {ownership === "MINE"
-                    ? <b>This step is yours.</b>
-                    : <>This step isn&rsquo;t yours. As {stepInRole} you can also act on it.</>}
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {permissions.submit && latestId != null ? (
-                    <Link to={`/submissions/${latestId}`} className={btnPrimary}>Fill out submission #{latestId}</Link>
-                  ) : null}
-                  <Link to={`/my-work?assessment=${assessment.id}`} className={permissions.submit && latestId != null ? btn : btnPrimary}>
-                    {workActionLabel(assessment.state, permissions, submissionIds.length > 0)} in My Work
-                  </Link>
-                </div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h3 className="text-xs font-bold" style={{ color: revision ? "var(--bad)" : "var(--brand-ink)" }}>{revision ? "Changes requested" : "Next step"}</h3>
+              <div className="mt-0.5 text-base font-semibold">{nextLine}</div>
+            </div>
+            {/* The buttons go to the action itself: the form to fill out, or this
+                assessment opened in My Work with its step in view. Nothing for
+                someone with no part in this step. */}
+            {mode === "record" && ownership !== "NONE" ? (
+              <div className="flex flex-wrap gap-2">
+                {permissions.submit && latestId != null ? <Link to={`/submissions/${latestId}`} className={btnPrimary}>Open form</Link> : null}
+                <Link to={`/my-work?assessment=${assessment.id}`} className={permissions.submit && latestId != null ? btn : btnPrimary}>
+                  {workActionLabel(assessment.state, permissions, submissionIds.length > 0)}
+                </Link>
               </div>
-            )
-          ) : !actionable ? (
-            <p className="mt-2.5 text-[13px] text-muted">No actions for your role on this step.</p>
-          ) : (
+            ) : null}
+          </div>
+
+          {mode === "record" || !actionable ? null : (
             <div className="mt-3 grid gap-2.5">
               {permissions.submit || permissions.addSubmission ? (
                 <div className="flex flex-wrap items-center gap-2">
@@ -615,7 +622,17 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
                   </>
                 ) : null}
                 {permissions.submit ? (
-                  <button type="button" disabled={busy || submissionIds.length === 0} className={btnPrimary} onClick={() => run(() => submitAssessment(assessment.id, notes.trim() || undefined))}>Submit for review</button>
+                  <button type="button" disabled={busy || submissionIds.length === 0} className={btnPrimary} onClick={() => setConfirmingSubmit(true)}>Submit for review</button>
+                ) : null}
+                {confirmingSubmit ? (
+                  <SubmitConfirmDialog
+                    busy={busy}
+                    onClose={() => setConfirmingSubmit(false)}
+                    onConfirm={() => {
+                      setConfirmingSubmit(false);
+                      run(() => submitAssessment(assessment.id, notes.trim() || undefined));
+                    }}
+                  />
                 ) : null}
                 {permissions.review ? (
                   <>
@@ -632,96 +649,84 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
         </section>
       )}
 
-      <Card title={`Technical submissions (${submissionIds.length})`} hint="All GISA forms attached to this assessment's incident" bodyClassName={submissionIds.length === 0 ? "p-4" : "overflow-x-auto"}>
-        {submissionIds.length === 0 ? (
-          <div className="text-sm text-muted">
-            No technical submission is attached{assessment.state === "FINALIZED" ? " — this assessment was signed off without a GISA form." : " yet — the assignee creates it once the assessment is routed."}
-          </div>
-        ) : (
-          <table className="w-full border-collapse">
-            <thead><tr className="border-b border-[var(--line)] bg-[var(--panel-soft)] text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted"><th className="px-3 py-2.5">ID</th><th className="px-3 py-2.5">Submission</th><th className="px-3 py-2.5">Status</th><th className="px-3 py-2.5">Reporter</th><th className="px-3 py-2.5">Created</th><th className="px-3 py-2.5">Submitted</th><th className="px-3 py-2.5 text-right">Action</th></tr></thead>
-            <tbody>
+      <div className="grid items-start gap-3.5 sm:grid-cols-2">
+        <Card title="Forms">
+          {submissionIds.length === 0 ? (
+            <div className="text-sm text-muted">None yet</div>
+          ) : (
+            <ul className="grid gap-2.5">
               {submissionIds.map((submissionId) => {
                 const submission = submissionsById.get(submissionId);
-                const descriptor = submission ? buildSubmissionDisplayTitle({ id: submission.id, created_at: submission.created_at, district: submission.district, county: submission.county, route: submission.route, post_mile: submission.post_mile }) : `Submission #${submissionId}`;
-                const status = submission?.status;
+                const started = shortDate(submission?.created_at);
+                const sent = shortDate(submission?.submitted_at);
                 return (
-                  <tr key={submissionId} className="border-b border-[var(--line)]/60 last:border-b-0">
-                    <td className="px-3 py-2.5 text-sm font-semibold tabular-nums">#{submissionId}</td>
-                    <td className="px-3 py-2.5 text-sm"><Link to={`/submissions/${submissionId}`} className="font-medium text-[var(--ink)] hover:text-[var(--brand)]">{descriptor}</Link></td>
-                    <td className="px-3 py-2.5 text-sm">{status ? <SubmissionStatusBadge status={status} /> : <span className="text-muted">—</span>}</td>
-                    <td className="px-3 py-2.5 text-sm text-muted">{submission ? (me?.id === submission.created_by_user_id ? "You" : `User #${submission.created_by_user_id}`) : "—"}</td>
-                    <td className="px-3 py-2.5 text-sm text-muted">{formatTimestamp(submission?.created_at)}</td>
-                    <td className="px-3 py-2.5 text-sm text-muted">{formatTimestamp(submission?.submitted_at)}</td>
-                    {/* "Open", never "Review": the decision lives on the assessment now. */}
-                    <td className="px-3 py-2.5 text-right"><Link to={`/submissions/${submissionId}`} className={status === "SUBMITTED" ? btnPrimary : btn}>Open</Link></td>
-                  </tr>
+                  <li key={submissionId} className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="min-w-0">
+                      <Link to={`/submissions/${submissionId}`} className="text-sm font-semibold text-[var(--brand-ink)] hover:underline">Form #{submissionId}</Link>
+                      <span className="block text-xs text-muted">
+                        {[started ? `Started ${started}` : null, sent ? `Sent ${sent}` : null].filter(Boolean).join(" · ")}
+                      </span>
+                    </span>
+                    {submission?.status ? <SubmissionStatusBadge status={submission.status} /> : null}
+                  </li>
                 );
               })}
-            </tbody>
-          </table>
-        )}
-      </Card>
+            </ul>
+          )}
+        </Card>
 
-      <Card
-        title="Assignments"
-        hint={
-          <>
-            {officeName}{branchName ? <> · {branchName}{branchRetired ? <RetiredBadge /> : null}</> : null}
-            {" · "}Review authority follows the assessment&apos;s route, never an assignment.
-          </>
-        }
-        actions={showConsultedManagement ? (
-          consultedOpen ? (
-            <>
-              <select className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-2 py-1 text-xs" value={consultedId} onChange={(event) => setConsultedId(event.target.value)}>
-                <option value="">Add for information…</option>
-                {availableConsulted.map((option) => <option key={option.id} value={option.id}>{option.full_name}</option>)}
-              </select>
-              <button type="button" disabled={busy || !consultedId} className={btn} onClick={() => run(() => addAssignment(assessment.id, { user_id: Number(consultedId), assignment_role: "CONSULTED", notes: notes.trim() || undefined }))}>Add</button>
-              <button type="button" disabled={busy} className={btn} onClick={() => { setConsultedOpen(false); setConsultedId(""); }}>Cancel</button>
-            </>
-          ) : (
-            <button type="button" disabled={busy} className={btn} onClick={() => setConsultedOpen(true)}>Add for information</button>
-          )
-        ) : null}
-      >
-        {assignments.length === 0 ? <div className="text-sm text-muted">No active assignments yet.</div> : (
-          <div className="grid gap-2">
-            {assignments.map((assignment) => {
-              const historical = isHistoricalAssignment(assignment.assignment_role);
-              return (
-                <div key={assignment.id} className={`flex flex-wrap items-center justify-between gap-2.5 rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] p-3 ${historical ? "opacity-60" : ""}`}>
-                  <div>
-                    <div className={`text-sm font-semibold ${historical ? "text-muted" : ""}`}>{assignment.full_name}</div>
-                    <div className="mt-0.5 text-xs text-muted">
-                      {historical ? "Former reviewer — no approval authority" : assignmentRoleLabel(assignment.assignment_role)} · {assignment.email}
-                    </div>
-                  </div>
+        <Card
+          title="People"
+          actions={showConsultedManagement ? (
+            consultedOpen ? (
+              <>
+                <select aria-label="Person to add" className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-2 py-1 text-xs" value={consultedId} onChange={(event) => setConsultedId(event.target.value)}>
+                  <option value="">Add for information…</option>
+                  {availableConsulted.map((option) => <option key={option.id} value={option.id}>{option.full_name}</option>)}
+                </select>
+                <button type="button" disabled={busy || !consultedId} className={btn} onClick={() => run(() => addAssignment(assessment.id, { user_id: Number(consultedId), assignment_role: "CONSULTED", notes: notes.trim() || undefined }))}>Add</button>
+                <button type="button" disabled={busy} className={btn} onClick={() => { setConsultedOpen(false); setConsultedId(""); }}>Cancel</button>
+              </>
+            ) : (
+              <button type="button" disabled={busy} className={btn} onClick={() => setConsultedOpen(true)}>Add</button>
+            )
+          ) : null}
+        >
+          <dl className="grid grid-cols-[84px_minmax(0,1fr)] items-center gap-x-2.5 gap-y-2 text-[13px]">
+            {assignedName ? <><dt className="text-muted">Assigned</dt><dd className="font-semibold">{assignedName}</dd></> : null}
+            {reviewer ? <><dt className="text-muted">Reviewer</dt><dd className="font-semibold">{reviewer}</dd></> : null}
+            {others.map((assignment) => (
+              <div key={assignment.id} className="contents">
+                <dt className="text-muted">{isHistoricalAssignment(assignment.assignment_role) ? "Former" : assignmentRoleLabel(assignment.assignment_role)}</dt>
+                <dd className={`flex items-center justify-between gap-2 ${isHistoricalAssignment(assignment.assignment_role) ? "text-muted" : "font-semibold"}`}>
+                  {assignment.full_name}
                   {assignment.assignment_role === "CONSULTED" && showConsultedManagement ? (
                     <button type="button" disabled={busy} className={`${btn} text-[var(--bad)]`} onClick={() => run(() => removeAssignment(assessment.id, assignment.id))}>Remove</button>
                   ) : null}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </Card>
-
-      <Card title={`Assessment history (${events.length})`} bodyClassName="max-h-[420px] overflow-auto p-4">
-        {events.length === 0 ? <div className="text-sm text-muted">No assessment events recorded yet.</div> : (
-          <div className="grid gap-2">
-            {[...events].reverse().map((event) => (
-              <div key={event.id} className="rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] p-3 text-[13px]">
-                <div className="flex flex-wrap justify-between gap-2">
-                  <div><div className="font-semibold">{assessmentEventLabel(event.event_type)}{event.disposition ? ` · ${humanizeCode(event.disposition)}` : ""}</div><div className="mt-0.5 text-xs text-muted">by {event.actor_name || event.actor_email || `User #${event.actor_user_id}`}</div></div>
-                  <span className="text-xs text-muted">{formatTimestamp(event.created_at)}</span>
-                </div>
-                {event.from_state || event.to_state ? <div className="mt-1.5 text-xs text-muted">{event.from_state ? assessmentStateLabel(event.from_state) : "—"} → {event.to_state ? assessmentStateLabel(event.to_state) : "—"}</div> : null}
-                {event.notes ? <div className="mt-2 rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2">{event.notes}</div> : null}
+                </dd>
               </div>
             ))}
-          </div>
+          </dl>
+          {!assignedName && !reviewer && others.length === 0 ? <div className="text-sm text-muted">Nobody yet</div> : null}
+        </Card>
+      </div>
+
+      <Card title="History">
+        {events.length === 0 ? <div className="text-sm text-muted">Nothing yet</div> : (
+          <ul className="divide-y divide-[var(--line)]">
+            {[...events].reverse().map((event) => (
+              <li key={event.id} className="py-2.5 text-[13px] first:pt-0 last:pb-0">
+                <div className="flex flex-wrap justify-between gap-x-3 gap-y-0.5">
+                  <span>
+                    <b className="font-semibold">{eventTitle(event)}</b>
+                    {event.actor_name || event.actor_email ? <span className="text-muted"> by {event.actor_name || event.actor_email}</span> : null}
+                  </span>
+                  <span className="text-xs text-muted">{formatTimestamp(event.created_at)}</span>
+                </div>
+                {event.notes ? <div className="mt-0.5 text-muted">“{event.notes}”</div> : null}
+              </li>
+            ))}
+          </ul>
         )}
       </Card>
     </div>
@@ -731,7 +736,6 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
 /** Rail entry shared by My Work and the Assessments record view. */
 export function AssessmentRailCard({
   assessment,
-  assignments,
   submissionsById,
   active,
   to,
@@ -746,32 +750,17 @@ export function AssessmentRailCard({
   onClick?: () => void;
   refCallback?: (element: HTMLElement | null) => void;
 }) {
-  const next = waitingOn(assessment, assignments ?? []);
-  const ids = submissionIdsOf(assessment);
-  const first = ids.length === 1 ? submissionsById.get(ids[0]) : undefined;
+  const { officeNames } = useOrgLabels();
+  const who = waitingWho(assessment);
+  const form = submissionsById.get(latestSubmissionId(assessment) ?? -1);
   const inner = (
     <>
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <div className="font-semibold">Assessment #{assessment.id}</div>
-          {/* The office and branch NAME from the routing snapshot, not the code:
-              a rail full of "Office WEST" tells a reader nothing they can use. */}
-          <div className="mt-0.5 text-xs text-muted">
-            Incident #{assessment.incident_id} · {assessmentOfficeName(assessment)}
-            {assessmentBranchName(assessment) ? ` · ${assessmentBranchName(assessment)}` : ""}
-            {" · "}D{assessment.district ?? "—"}
-          </div>
-        </div>
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0 truncate text-sm font-semibold">{formLocation(form) ?? `Incident #${assessment.incident_id}`}</div>
         <AssessmentStateBadge state={assessment.state} routingPath={assessment.routing_path} mini />
       </div>
-      <div className="mt-2 text-xs">{next ? <><span className="text-muted">Waiting on </span><b className="font-semibold">{next.who}</b></> : <span className="font-semibold text-[var(--good)]">Complete</span>}</div>
-      <div className="mt-0.5 text-xs text-muted">
-        {ids.length === 0
-          ? "No technical submissions attached"
-          : ids.length === 1
-            ? `Submission #${ids[0]}${first ? ` · ${buildSubmissionDisplayTitle({ id: first.id, created_at: first.created_at, district: first.district, county: first.county, route: first.route, post_mile: first.post_mile })}` : ""}`
-            : `${ids.length} submissions · ${ids.map((id) => `#${id}`).join(", ")}`}
-      </div>
+      <div className="mt-1 text-[13px] text-muted">{assessmentPlace(assessment, officeNames)}</div>
+      {who ? <div className="mt-0.5 text-[13px]"><span className="text-muted">Waiting on </span><b className="font-semibold">{who}</b></div> : null}
     </>
   );
   const className = `block w-full rounded-lg border p-3 text-left text-[var(--ink)] ${active ? "border-[var(--brand)] bg-[color:color-mix(in_oklab,var(--brand)_7%,var(--panel))]" : "border-[var(--line)] bg-[var(--panel)] hover:border-[color:color-mix(in_oklab,var(--brand)_45%,var(--line))] hover:bg-[var(--panel-soft)]"}`;

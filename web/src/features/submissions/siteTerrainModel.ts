@@ -9,8 +9,9 @@
 // - project the outline on the fall line  -> length (Ld, along the slope) and
 //                                            width (Wd, across it);
 // - take the relief of inside + band      -> slope height (H).
-// Main scarp height, and the roadway encroachment, are not measurable from a
-// terrain model and are left to the engineer.
+// Main scarp height and the roadway encroachment are not measurable from a
+// terrain model. With a drone survey the scarp can be suggested (scarpSuggestion);
+// the roadway is left to the engineer.
 
 export type LonLat = [number, number];
 export type Ring = LonLat[];
@@ -134,6 +135,25 @@ function percentile(sorted: number[], p: number): number {
   return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
 }
 
+/** A spot in the world: longitude, latitude, height in metres. */
+export type GuidePoint = [number, number, number];
+
+/** A fitted plane down its fall line, raised clear of the ground it was fitted to so it can be seen against it. */
+export type SlopeGuide = { top: GuidePoint; bottom: GuidePoint };
+
+/** Where a measurement lies on the ground, to draw it rather than only state it. */
+export type MeasurementGuides = {
+  /** Down the inside plane's fall line, over the whole length of the outline. */
+  slope: SlopeGuide;
+  /** The same on the plane fitted to the band around the outline (none without enough samples there). */
+  band: SlopeGuide | null;
+  /** Across the fall line, over the whole width of the outline, at the middle of its length. */
+  width: [LonLat, LonLat];
+  /** The samples nearest the low and high elevations the height is taken between. */
+  low: GuidePoint;
+  high: GuidePoint;
+};
+
 export type SiteMeasurement = {
   landslideSlopeDeg: number;
   originalSlopeDeg: number | null;
@@ -150,7 +170,21 @@ export type SiteMeasurement = {
   aroundSamples: number;
   /** True when the slope is too gentle for a reliable fall line; length follows the outline's long axis. */
   directionFromOutline: boolean;
+  guides: MeasurementGuides;
 };
+
+/** How far to raise a plane so most of the ground it was fitted to lies under it. */
+function clearance(points: Array<{ x: number; y: number; z: number }>, plane: Plane): number {
+  const above = points.map((p) => p.z - (plane.a * p.x + plane.b * p.y + plane.c)).sort((a, b) => a - b);
+  return Math.max(0, percentile(above, 0.95)) + 2;
+}
+
+/** The sample whose height is nearest `z`. */
+function nearestHeight(samples: Sample[], z: number): GuidePoint {
+  let best = samples[0];
+  for (const s of samples) if (Math.abs(s.z - z) < Math.abs(best.z - z)) best = s;
+  return [best.lon, best.lat, z];
+}
 
 /** Measure the outline against DEM samples inside it and around it. */
 export function measureSiteArea(rings: Ring[], inside: Sample[], around: Sample[]): SiteMeasurement | null {
@@ -200,6 +234,40 @@ export function measureSiteArea(rings: Ring[], inside: Sample[], around: Sample[
   const lowElevationM = percentile(elevations, 0.02);
   const highElevationM = percentile(elevations, 0.98);
 
+  const fromAlong = (alongM: number, acrossM: number): XY => [alongM * ux - acrossM * uy, alongM * uy + acrossM * ux];
+  const [alongLo, alongHi] = [Math.min(...along), Math.max(...along)];
+  const [acrossLo, acrossHi] = [Math.min(...across), Math.max(...across)];
+  const [alongMid, acrossMid] = [(alongLo + alongHi) / 2, (acrossLo + acrossHi) / 2];
+  const onPlane = (xy: XY, plane: Plane, lift: number): GuidePoint => {
+    const [lon, lat] = frame.toLonLat(xy);
+    return [lon, lat, plane.a * xy[0] + plane.b * xy[1] + plane.c + lift];
+  };
+  const insideLift = clearance(inside.map(toPoint), insidePlane);
+  const slope: SlopeGuide = {
+    top: onPlane(fromAlong(alongLo, acrossMid), insidePlane, insideLift),
+    bottom: onPlane(fromAlong(alongHi, acrossMid), insidePlane, insideLift),
+  };
+  let band: SlopeGuide | null = null;
+  const bandGradient = aroundPlane ? Math.hypot(aroundPlane.a, aroundPlane.b) : 0;
+  if (aroundPlane && bandGradient > 1e-6) {
+    // The band's own fall line, through the middle of the outline, as long as the outline.
+    const [mx, my] = fromAlong(alongMid, acrossMid);
+    const half = (alongHi - alongLo) / 2;
+    const [bx, by] = [-aroundPlane.a / bandGradient, -aroundPlane.b / bandGradient];
+    const lift = clearance(around.map(toPoint), aroundPlane);
+    band = {
+      top: onPlane([mx - bx * half, my - by * half], aroundPlane, lift),
+      bottom: onPlane([mx + bx * half, my + by * half], aroundPlane, lift),
+    };
+  }
+  const guides: MeasurementGuides = {
+    slope,
+    band,
+    width: [frame.toLonLat(fromAlong(alongMid, acrossLo)), frame.toLonLat(fromAlong(alongMid, acrossHi))],
+    low: nearestHeight([...inside, ...around], lowElevationM),
+    high: nearestHeight([...inside, ...around], highElevationM),
+  };
+
   return {
     landslideSlopeDeg,
     originalSlopeDeg: aroundPlane ? deg(Math.atan(Math.hypot(aroundPlane.a, aroundPlane.b))) : null,
@@ -213,6 +281,7 @@ export function measureSiteArea(rings: Ring[], inside: Sample[], around: Sample[
     insideSamples: inside.length,
     aroundSamples: around.length,
     directionFromOutline,
+    guides,
   };
 }
 
@@ -374,4 +443,35 @@ export function pointsAlongPath(path: LonLat[], count: number): Array<{ point: L
     const [bx, by] = xy[segment];
     return { point: frame.toLonLat([ax + (bx - ax) * t, ay + (by - ay) * t]), distanceM: d };
   });
+}
+
+/** One spot along a section down the slope, for working out what happened at the head of the slide. */
+export type SectionSpot = { point?: LonLat; historical: number | null; historicalSea?: boolean; actual: number | null };
+
+export type ScarpSuggestion = { heightM: number; point: LonLat; beforeM: number; nowM: number };
+
+/** Drops smaller than this (metres) are within what two elevation models disagree by anyway. */
+const MIN_SCARP_M = 0.3;
+
+/**
+ * A suggestion for the main scarp height (Hs): the largest drop from the ground
+ * before to the ground now in the upper third of the outline, along a section
+ * running top to bottom. It is only a suggestion, for someone to check against
+ * the field: the true scarp is measured from its crown to the top of the mass.
+ */
+export function scarpSuggestion(rings: Ring[], section: SectionSpot[]): ScarpSuggestion | null {
+  const [lon0, lat0] = ringCentroid(rings[0]);
+  const frame = localFrame(lon0, lat0);
+  const xyRings = rings.map((ring) => ring.map(frame.toXY));
+  const inside = section.filter((s) => s.point && pointInRings(frame.toXY(s.point), xyRings));
+  if (inside.length < 3) return null;
+  let best: ScarpSuggestion | null = null;
+  for (const spot of inside.slice(0, Math.ceil(inside.length / 3))) {
+    if (spot.historical == null || spot.actual == null || spot.historicalSea) continue;
+    const drop = spot.historical - spot.actual;
+    if (drop >= MIN_SCARP_M && (!best || drop > best.heightM)) {
+      best = { heightM: drop, point: spot.point!, beforeM: spot.historical, nowM: spot.actual };
+    }
+  }
+  return best;
 }
