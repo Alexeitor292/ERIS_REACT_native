@@ -47,6 +47,8 @@ final class OfflineSync: ObservableObject {
                                                    ofItemAtPath: url.path)
         })
         Self.excludeFromBackup(Self.folder(for: userId))
+        // Esri's terms do not allow keeping its elevation on a device. Earlier builds did; measuring uses USGS now.
+        store.removeCopies(startingWith: "esri-elevation-")
         waiting = store.waiting
         monitor.pathUpdateHandler = { [weak self] path in
             Task { @MainActor in

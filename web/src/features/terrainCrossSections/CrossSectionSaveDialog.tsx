@@ -110,7 +110,7 @@ export default function CrossSectionSaveDialog({
         notes: notes.trim() || null,
         preferred_spacing_m: preferredSpacingM,
         actual_spacing_m: actualSpacingM,
-        dem_source: "ARCGIS_WORLD_ELEVATION",
+        dem_source: "USGS_3DEP",
         control_points: draftPoints,
         profile_snapshot: profile,
       };

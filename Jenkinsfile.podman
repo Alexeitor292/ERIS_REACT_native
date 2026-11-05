@@ -48,15 +48,18 @@ pipeline {
           env.ERIS_REPO = "${params.HARBOR_HOST}/${params.HARBOR_PROJECT}"
           env.ERIS_SOURCE_REVISION = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
         }
-        sh '''
-          set -eu
-          labels="--label org.opencontainers.image.revision=$ERIS_SOURCE_REVISION --label org.opencontainers.image.version=$ERIS_TAG"
-          podman build $labels -t "$ERIS_REPO/api:$ERIS_TAG" backend
-          podman build $labels -f backend/Dockerfile.worker -t "$ERIS_REPO/worker:$ERIS_TAG" backend
-          bash deploy/podman/build-web.sh "$ERIS_REPO/web:$ERIS_TAG" \
-            "$ENTRA_ENABLED" "$LOCAL_LOGIN_ENABLED"
-          podman run --rm --entrypoint python "$ERIS_REPO/api:$ERIS_TAG" -m compileall -q app
-        '''
+        // The website's browser-safe ArcGIS key, restricted to its address (docs/map-licensing.md).
+        withCredentials([string(credentialsId: 'eris-arcgis-web-key', variable: 'VITE_ARCGIS_API_KEY')]) {
+          sh '''
+            set -eu
+            labels="--label org.opencontainers.image.revision=$ERIS_SOURCE_REVISION --label org.opencontainers.image.version=$ERIS_TAG"
+            podman build $labels -t "$ERIS_REPO/api:$ERIS_TAG" backend
+            podman build $labels -f backend/Dockerfile.worker -t "$ERIS_REPO/worker:$ERIS_TAG" backend
+            bash deploy/podman/build-web.sh "$ERIS_REPO/web:$ERIS_TAG" \
+              "$ENTRA_ENABLED" "$LOCAL_LOGIN_ENABLED"
+            podman run --rm --entrypoint python "$ERIS_REPO/api:$ERIS_TAG" -m compileall -q app
+          '''
+        }
       }
     }
     stage('Backend security checks') {

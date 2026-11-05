@@ -25,8 +25,8 @@ extension APIClient {
 /// Everything a person needs to work on what is assigned to them, kept on
 /// this iPhone without their asking: for each assessment assigned to them
 /// (Draft or Revision requested), the assessment, its incident and the
-/// incident's photos, every technical form with its site history and photos,
-/// and the choice lists. Run when work may have changed (a notice arrives,
+/// incident's photos, every technical form with its site history, photos and the
+/// elevation around its site, and the choice lists. Run when work may have changed (a notice arrives,
 /// the network returns, the app comes to the front, now and then in the
 /// background), so work assigned while offline is ready once back online.
 public struct AssignedWork: Sendable {
@@ -98,6 +98,8 @@ public struct AssignedWork: Sendable {
                 case .unreachable: summary.unreachable = true
                 default: break
                 }
+                // The ground around the site, for filling in the measurements with no signal.
+                await KeptElevationTiles(api: api, store: store).keep(form: form.value.form)
                 for photo in GisaPhotoSections.allPhotos(of: form.value) {
                     wanted.insert(photo.id)
                     if store.file(photo.id) != nil { continue }

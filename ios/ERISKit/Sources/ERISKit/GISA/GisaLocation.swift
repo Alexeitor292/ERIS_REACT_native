@@ -50,6 +50,10 @@ extension GisaForm {
         return components.url
     }
 
+    /// Who to credit under that snapshot: Esri requires it, and the map widget that adds it
+    /// elsewhere is not there. World Imagery's own copyright text.
+    public static let mapPreviewCredit = "Powered by Esri. Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community"
+
     /// The location in Google Maps.
     public var googleMapsURL: URL? {
         guard let (latitude, longitude) = coordinate else { return nil }

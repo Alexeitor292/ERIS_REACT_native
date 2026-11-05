@@ -652,7 +652,7 @@ export default function InteractiveTerrainScene({
         <div className="text-[11px] font-semibold leading-tight">{incidentLabel || "Incident location"}</div>
         <div className="text-[10px] leading-tight text-white/80">{summary}</div>
         <div className="mt-0.5 text-[8px] leading-tight text-white/55">
-          Terrain & imagery © Esri, Maxar, Earthstar Geographics, USGS, and the GIS community
+          Terrain & imagery © Esri, Vantor, Earthstar Geographics, USGS, and the GIS community
         </div>
       </div>
 

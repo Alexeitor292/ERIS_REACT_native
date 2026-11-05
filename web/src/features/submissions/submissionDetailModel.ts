@@ -191,11 +191,6 @@ export function normalizeCounty(value: string) {
   return value.replace(/\s+County$/i, "").trim();
 }
 
-export function tryExtractRoute(addressText: string) {
-  const match = addressText.match(/\b(?:I|US|CA|SR)[-\s]?(\d{1,3})\b/i) || addressText.match(/\b(\d{1,3})\b/);
-  return normalizeRouteValue(match?.[1] ?? null);
-}
-
 export function normalizeDistrictValue(value: unknown) {
   const raw = String(value ?? "").trim();
   if (!raw) return "";

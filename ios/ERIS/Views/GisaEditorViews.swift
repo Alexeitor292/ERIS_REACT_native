@@ -904,6 +904,7 @@ struct GisaHeaderSections: View {
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .accessibilityLabel("Satellite view of the location")
+                    Text(GisaForm.mapPreviewCredit).font(.caption2).foregroundStyle(.secondary)
                 } else {
                     Text("Awaiting location…").foregroundStyle(.secondary)
                 }

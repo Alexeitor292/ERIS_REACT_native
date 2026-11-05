@@ -105,7 +105,7 @@ alias dc='docker compose --env-file .env.proxmox -f docker-compose.yml -f docker
 6. **Start everything:**
 
    ```bash
-   export VITE_ARCGIS_API_KEY='<browser key>'   # optional; see configuration.md
+   export VITE_ARCGIS_API_KEY='<browser key>'   # required in production; see map-licensing.md
    dc up -d --build
    unset VITE_ARCGIS_API_KEY
    ```

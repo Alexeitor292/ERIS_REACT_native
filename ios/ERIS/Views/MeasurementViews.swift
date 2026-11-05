@@ -52,7 +52,7 @@ final class SiteMeasuringModel: ObservableObject {
             }
             busy = "Measuring the ground…"
             let key = key(area: area)
-            result = try await Self.measured(area: area, now: now, before: before, store: store, terrainFolder: terrainFolder)
+            result = try await Self.measured(area: area, now: now, before: before, api: api, store: store, terrainFolder: terrainFolder)
             resultKey = key
         } catch let refused as SiteMeasureResult.Problem {
             problem = refused.message
@@ -64,16 +64,16 @@ final class SiteMeasuringModel: ObservableObject {
         busy = nil
     }
 
-    /// Esri's tiles, read as the website reads them, kept once read. Without a signal
-    /// or a copy of them, the terrain kept on this iPhone, which the screen then says.
-    private static func measured(area: SiteAreas.Area, now: SurveyGround?, before: SurveyGround?, store: OfflineStore, terrainFolder: URL?) async throws -> SiteMeasureResult {
+    /// The USGS tiles the website reads, kept once read. Without a signal or a copy of them,
+    /// the terrain package kept on this iPhone, which the screen then says.
+    private static func measured(area: SiteAreas.Area, now: SurveyGround?, before: SurveyGround?, api: APIClient, store: OfflineStore, terrainFolder: URL?) async throws -> SiteMeasureResult {
         #if DEBUG
         if DemoServer.isEnabled {
             return try await SiteMeasureResult.measure(area: area, terrain: DemoElevation(), now: now, before: before)
         }
         #endif
         do {
-            return try await SiteMeasureResult.measure(area: area, terrain: KeptEsriTiles(store: store).elevation, now: now, before: before)
+            return try await SiteMeasureResult.measure(area: area, terrain: KeptElevationTiles(api: api, store: store).elevation, now: now, before: before)
         } catch let refused as SiteMeasureResult.Problem {
             throw refused
         } catch {
@@ -82,12 +82,11 @@ final class SiteMeasuringModel: ObservableObject {
         }
     }
 
-    /// Keeps the area's tiles while there is a signal, so it can be measured later without one.
-    func keepTiles(for area: SiteAreas.Area?, store: OfflineStore) async {
-        guard !DemoMode.isOn, let area else { return }
-        let rings = SiteTerrain.rings(area)
-        guard let outer = rings.first, outer.count >= 3 else { return }
-        _ = try? await KeptEsriTiles(store: store).elevation.heights(at: SiteTerrain.spotsToKeep(rings))
+    /// Keeps the elevation around the site and under the areas while there is a signal,
+    /// so they can be measured later without one.
+    func keepTiles(form: GisaForm, api: APIClient, store: OfflineStore) async {
+        guard !DemoMode.isOn else { return }
+        await KeptElevationTiles(api: api, store: store).keep(form: form)
     }
 }
 
@@ -151,7 +150,7 @@ struct GisaMeasurementsSection: View {
         .task(id: submissionId) {
             guard let submissionId else { return }
             await measuring.loadSurveys(submissionId, api: model.api, store: offline.store)
-            await measuring.keepTiles(for: area, store: offline.store)
+            await measuring.keepTiles(form: editor.form, api: model.api, store: offline.store)
         }
     }
 
@@ -220,7 +219,7 @@ struct GisaMeasurementsSection: View {
                     Text("The area or the survey changed since it was measured. Measure it again.").foregroundStyle(.orange)
                 }
                 if let current, current.terrainSource == PackagedElevation.name {
-                    Text("Measured with no signal from the terrain kept on this iPhone, which is not the website's elevation data, so values can differ. Measure again with a signal to match the website.")
+                    Text("Measured with no signal from the terrain kept on this iPhone, which is coarser than the website's elevation data, so values can differ. Measure again with a signal to match the website.")
                         .foregroundStyle(.orange)
                         .accessibilityIdentifier("measured-offline-differs")
                 }
@@ -243,8 +242,8 @@ struct GisaMeasurementsSection: View {
         } footer: {
             if !areas.isEmpty, current?.terrainSource != PackagedElevation.name {
                 Text(measuring.surveys.isEmpty
-                     ? "From the terrain, usually mapped before the slide, using the same Esri elevation as the website. Drone surveys are added on the website."
-                     : "From the terrain and the drone survey, using the same Esri elevation as the website.")
+                     ? "From the terrain, usually mapped before the slide, using the same USGS elevation as the website. Works with no signal for assigned work. Drone surveys are added on the website."
+                     : "From the terrain and the drone survey, using the same USGS elevation as the website.")
             }
         }
     }

@@ -16,6 +16,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Without a key the website's maps fall back to OpenStreetMap's tile servers, which
+# are fine for trying it out but do not take regular production use.
+if [[ -z "${VITE_ARCGIS_API_KEY:-}" ]]; then
+  echo "WARN: VITE_ARCGIS_API_KEY is not set; the website's maps will use OpenStreetMap's tile servers. Do not use this build in production." >&2
+fi
+
 mkdir -p "$scratch/dist"
 builder_image="$(podman build -q --target prepared "$root/web")"
 podman run --rm --network none \
@@ -23,6 +29,8 @@ podman run --rm --network none \
   -e VITE_API_BASE_URL=/api -e VITE_API_BASE=/api \
   -e VITE_ENTRA_ENABLED="$entra_enabled" \
   -e VITE_LOCAL_LOGIN_ENABLED="$local_login_enabled" \
+  -e VITE_ARCGIS_API_KEY="${VITE_ARCGIS_API_KEY:-}" \
+  -e VITE_GOOGLE_MAPS_EMBED_KEY="${VITE_GOOGLE_MAPS_EMBED_KEY:-}" \
   -v "$scratch/dist:/app/dist:Z" \
   "$builder_image" npm run build
 cp "$root/web/nginx.conf" "$scratch/nginx.conf"

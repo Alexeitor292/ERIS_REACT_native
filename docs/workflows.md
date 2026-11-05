@@ -110,7 +110,7 @@ DRAFT ──submit──► SUBMITTED ──approve──► APPROVED (final)
 
    Opening the workspace measures by itself, without saving anything; **Measure
    again** does it on request and keeps the comparison with the survey. It samples
-   Esri World Elevation (the finest resolution that covers the whole area) inside a
+   USGS 3DEP elevation (read about every metre, 1 m lidar wherever it exists), through ERIS, inside a
    drawn area and in a band around it, in the browser. It then suggests β and α
    (planes fitted inside and around), Ld along the fall line, Wd across it, and H
    (the area's relief, 2nd to 98th percentile). Lr and Wr are measured on site.
@@ -138,10 +138,12 @@ DRAFT ──submit──► SUBMITTED ──approve──► APPROVED (final)
    sketch (tap it to read it large), the eight values grouped as on the website,
    sliders for the angles and **Next** above the keyboard. They save with the form,
    with or without a signal. **Measure** suggests values from an area drawn on the
-   map with the same calculations and the same Esri elevation as the website, read
-   tile by tile the way the website's library reads them, so the values match. The
-   tiles are kept on the iPhone once read. With no signal and no copy it uses the
-   terrain kept on the iPhone and says the values can differ. It reads the drone surveys uploaded on the website, kept on
+   map with the same calculations and the same USGS tiles as the website, so the
+   values match. The tiles are kept on the iPhone once read, and for assigned work
+   the ground within about 750 m of the site is fetched ahead of time, so an area
+   can be measured, or drawn and measured, with no signal. Beyond that, with no
+   signal, it uses the terrain package kept on the iPhone, which is coarser, and
+   says the values can differ. It reads the drone surveys uploaded on the website, kept on
    the iPhone once read, and shows what changed, the profile and the displacement.
    Surveys are added on the website. The iPhone has no values drawn on a map and no
    hand-drawn section line.

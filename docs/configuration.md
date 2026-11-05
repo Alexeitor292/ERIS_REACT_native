@@ -230,7 +230,7 @@ Read at build time (`npm run dev`, `npm run build`, or the web Docker image).
 | `VITE_API_BASE_URL` | `/api` | Backend address. Keep it same-origin: the session cookie is not sent to another origin. |
 | `VITE_DEV_API_TARGET` | `http://127.0.0.1:8000` | Where `npm run dev` proxies `/api`. |
 | `VITE_API_BASE` | — | Older alias, used only if `VITE_API_BASE_URL` is unset. |
-| `VITE_ARCGIS_API_KEY` | empty | Browser-safe ArcGIS key for the 3D terrain view. Optional in development; set it in production and restrict it to the site's origin in the ArcGIS dashboard. |
+| `VITE_ARCGIS_API_KEY` | empty | Browser-safe ArcGIS key for the website's maps. Optional in development, where maps fall back to OpenStreetMap's tile servers; required in production (see [map-licensing.md](map-licensing.md)) and restrict it to the site's origin in the ArcGIS dashboard. |
 | `VITE_CALTRANS_POSTMILE_LAYER_URL` | public Caltrans SHN Postmiles Tenth layer | Layer the "Report an incident" form uses to convert between coordinates and route/postmile. Change only to use a mirror. |
 | `VITE_CALTRANS_HIGHWAYS_URL` | empty | Optional Caltrans freeways and expressways map overlay. Empty: no overlay, and no request to that service. |
 | `VITE_GOOGLE_MAPS_EMBED_KEY` | empty | Optional. Shows Street View inside the report form; without it Street View opens in a new tab. Restrict the key to the site's domain. |

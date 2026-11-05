@@ -1,6 +1,6 @@
 import Foundation
 
-/// One tile of Esri World Elevation, as the service sends it (LERC 1, "CntZImage"):
+/// One tile of USGS 3DEP elevation, as ERIS sends it (LERC 1, "CntZImage"):
 /// a grid of heights running corner to corner of the tile, NaN where it has no data.
 public struct ElevationTile: Equatable, Sendable {
     public let width: Int
@@ -185,74 +185,70 @@ public struct ElevationTile: Equatable, Sendable {
     }
 }
 
-/// Esri World Elevation read tile by tile, the way the website's ArcGIS library reads it
-/// ("finest-contiguous": the finest level holding data for every point asked), so the iPhone
-/// and the website get the same heights. Esri's native library chooses its own level, which
-/// differed from the website's by up to 3 m. Checked against the website: within 1 mm.
-public struct EsriElevation: ElevationSampling {
-    /// A tile's bytes, or nil if the service has none there.
-    public typealias FetchTile = @Sendable (_ level: Int, _ row: Int, _ col: Int) async throws -> Data?
+/// USGS 3DEP elevation, read tile by tile from ERIS, with the website reading the same tiles
+/// the same way (`elevationTile.ts`), so the iPhone and the website get the same heights.
+/// USGS data is public domain, so the tiles may be kept on the iPhone for use with no signal.
+/// Heights run about every metre, and USGS puts the finest source it has at each place on top.
+public struct UsgsElevation: ElevationSampling {
+    /// A tile's bytes, or nil if ERIS has none there.
+    public typealias FetchTile = @Sendable (_ row: Int, _ col: Int) async throws -> Data?
 
-    public static let serviceURL = "https://elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer/tile"
-    static let finestLevel = 16
+    public static let name = "USGS 3DEP"
+    static let level = 17
     static let originX = -20037508.342787, originY = 20037508.342787
     static let resolutionAtLevelZero = 156543.03392800014
     static let earthRadius = 6378137.0
     static let cellsPerTile = 256.0
+    static var tileSizeM: Double { resolutionAtLevelZero / pow(2, Double(level)) * cellsPerTile }
 
     let fetch: FetchTile
-    public var sourceName: String { "Esri World Elevation" }
+    public var sourceName: String { Self.name }
 
     public init(fetch: @escaping FetchTile) { self.fetch = fetch }
 
-    private struct Tile: Hashable { let level: Int, row: Int, col: Int }
+    private struct Tile: Hashable { let row: Int, col: Int }
     private struct Place { let tile: Tile; let x: Double; let y: Double }
 
     static func mercator(_ spot: SiteTerrain.Spot) -> (x: Double, y: Double) {
         (spot.lon * .pi / 180 * earthRadius, earthRadius * log(tan(.pi / 4 + spot.lat * .pi / 360)))
     }
 
-    private func place(_ spot: SiteTerrain.Spot, level: Int) -> Place {
+    private func place(_ spot: SiteTerrain.Spot) -> Place {
         let m = Self.mercator(spot)
-        let size = Self.resolutionAtLevelZero / pow(2, Double(level)) * Self.cellsPerTile
+        let size = Self.tileSizeM
         let col = ((m.x - Self.originX) / size).rounded(.down)
         let row = ((Self.originY - m.y) / size).rounded(.down)
-        return Place(tile: Tile(level: level, row: Int(row), col: Int(col)),
+        return Place(tile: Tile(row: Int(row), col: Int(col)),
                      x: (m.x - Self.originX) / size - col,
                      y: (Self.originY - m.y) / size - row)
     }
 
     public func heights(at spots: [SiteTerrain.Spot]) async throws -> [Double?] {
         guard !spots.isEmpty else { return [] }
-        for level in stride(from: Self.finestLevel, through: 0, by: -1) {
-            if let heights = try await heights(at: spots, level: level) { return heights }
-        }
-        return spots.map { _ in nil }
-    }
-
-    /// Nil when this level lacks any of the points.
-    private func heights(at spots: [SiteTerrain.Spot], level: Int) async throws -> [Double?]? {
-        let places = spots.map { place($0, level: level) }
+        let places = spots.map(place)
         let fetch = self.fetch
         let tiles = try await withThrowingTaskGroup(of: (Tile, ElevationTile?).self) { group in
+            var out: [Tile: ElevationTile] = [:]
+            var running = 0
             for tile in Set(places.map(\.tile)) {
+                // A few at a time: over a weak signal, more only makes them all time out.
+                if running == Self.atOnce, let (done, read) = try await group.next() {
+                    out[done] = read
+                    running -= 1
+                }
                 group.addTask {
-                    let data = try await fetch(tile.level, tile.row, tile.col)
+                    let data = try await fetch(tile.row, tile.col)
                     return (tile, try data.map { try ElevationTile(data: $0) })
                 }
+                running += 1
             }
-            var out: [Tile: ElevationTile] = [:]
-            for try await (tile, read) in group { out[tile] = read }
+            for try await (done, read) in group { out[done] = read }
             return out
         }
-        var out = [Double?]()
-        out.reserveCapacity(places.count)
-        for place in places {
-            guard let height = tiles[place.tile]?.height(atX: place.x, y: place.y) else { return nil }
-            out.append(height)
-        }
-        return out
+        return places.map { tiles[$0.tile]?.height(atX: $0.x, y: $0.y) }
     }
+
+    static let atOnce = 6
 }
 
 extension SiteTerrain {
@@ -266,5 +262,15 @@ extension SiteTerrain {
         let (minX, maxX) = (outline.map(\.x).min()! - margin, outline.map(\.x).max()! + margin)
         let (minY, maxY) = (outline.map(\.y).min()! - margin, outline.map(\.y).max()! + margin)
         return plan.inside + plan.around + [frame.spot(minX, minY), frame.spot(minX, maxY), frame.spot(maxX, minY), frame.spot(maxX, maxY)]
+    }
+
+    /// The spots whose tiles to keep around a site, so an area drawn there with no signal can
+    /// be measured too: within about `radiusM` of it, closer together than a tile is wide (at
+    /// least 225 m in California) so that none is skipped. About 10 MB for a site.
+    public static func spotsAround(latitude: Double, longitude: Double, radiusM: Double = 750) -> [Spot] {
+        let frame = Frame(Spot(lon: longitude, lat: latitude))
+        let gaps = Int((2 * radiusM / 200).rounded(.up))
+        let steps = (0...gaps).map { -radiusM + 2 * radiusM * Double($0) / Double(gaps) }
+        return steps.flatMap { y in steps.map { x in frame.spot(x, y) } }
     }
 }

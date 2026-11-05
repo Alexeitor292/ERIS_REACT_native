@@ -40,6 +40,7 @@ from .routes.field_notices import router as field_notices_router
 from .routes.sharing import router as sharing_router
 from .routes.notifications import router as notifications_router
 from .routes.drone_surveys import router as drone_surveys_router
+from .routes.elevation_tiles import router as elevation_tiles_router
 from .routes.cracks import list_cracks, router as cracks_router
 from .routes.form_presence import router as form_presence_router
 from .routes.road_inventory import router as road_inventory_router
@@ -132,6 +133,7 @@ app.include_router(delegations_router)
 app.include_router(field_notices_router)
 app.include_router(notifications_router)
 app.include_router(drone_surveys_router)
+app.include_router(elevation_tiles_router)
 app.include_router(cracks_router)
 app.include_router(form_presence_router)
 
@@ -336,32 +338,6 @@ def _normalize_county(raw: str | None) -> str | None:
     if not raw:
         return None
     return re.sub(r"\s+County$", "", raw.strip(), flags=re.IGNORECASE) or None
-
-
-def _extract_route_from_text(text_value: str | None) -> str | None:
-    if not text_value:
-        return None
-    m = re.search(r"\b(?:I|US|CA|SR)[-\s]?(\d{1,3})\b", text_value, flags=re.IGNORECASE)
-    if m:
-        return m.group(1)
-    m = re.search(r"\b(\d{1,3})\b", text_value)
-    return normalize_route(m.group(1) if m else None)
-
-
-def _reverse_geocode_arcgis(lat: float, lon: float) -> dict:
-    params = urlencode({"f": "pjson", "location": f"{lon},{lat}"})
-    url = f"https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/reverseGeocode?{params}"
-    data = _safe_json_get(url) or {}
-    address = data.get("address") if isinstance(data.get("address"), dict) else {}
-    county = _normalize_county(address.get("Subregion") or address.get("District"))
-    route = _extract_route_from_text(
-        address.get("ShortLabel") or address.get("LongLabel") or address.get("Match_addr")
-    )
-    return {
-        "county": county,
-        "route": route,
-        "source_reverse": "arcgis_world_geocoder" if address else None,
-    }
 
 
 def _query_postmile_layer(lat: float, lon: float) -> dict:
@@ -935,18 +911,18 @@ def enrich_point(
     if rounded_lat is None or rounded_lon is None:
         raise HTTPException(status_code=422, detail="Invalid latitude/longitude value")
 
-    reverse_info = _reverse_geocode_arcgis(rounded_lat, rounded_lon)
+    # Only the Caltrans layer: Esri's geocoder may not supply values that get stored
+    # without a paid, authenticated request, and this one knows the routes better.
     layer_info = _query_postmile_layer(rounded_lat, rounded_lon)
 
     return {
         "latitude": rounded_lat,
         "longitude": rounded_lon,
         "district": layer_info.get("district"),
-        "county": layer_info.get("county") or reverse_info.get("county"),
-        "route": layer_info.get("route") or reverse_info.get("route"),
+        "county": layer_info.get("county"),
+        "route": layer_info.get("route"),
         "post_mile": layer_info.get("post_mile"),
         "source": {
-            "reverse_geocode": reverse_info.get("source_reverse"),
             "postmile_layer": layer_info.get("source_postmile"),
             "requested_by_user_id": user["id"],
         },

@@ -4,17 +4,14 @@ import test from "node:test";
 import {
   adaptiveSampleSpacingMeters,
   controlPointDistances,
-  demResolutionModeLabel,
-  demResolutionQueryValue,
   formatDemResolution,
   formatElevation,
   formatHorizontalDistance,
-  formatTerrainSamplingResolution,
   pathLengthMeters,
   profileFromPath,
-  summarizeDemResolution,
-  withDemSourceCoverage,
+  usgsProfileMetadata,
 } from "./terrainCrossSectionModel.ts";
+import { demQualityNote } from "./demResolutionCoverageModel.ts";
 
 test("adaptive sampling never imposes a path-length cap", () => {
   assert.equal(adaptiveSampleSpacingMeters(1000), 10);
@@ -25,59 +22,37 @@ test("adaptive sampling never imposes a path-length cap", () => {
   assert.ok(adaptiveSampleSpacingMeters(2_000_000) > adaptiveSampleSpacingMeters(500_000));
 });
 
-test("DEM resolution modes map to ArcGIS elevation query values", () => {
-  assert.equal(demResolutionQueryValue("best-available"), "finest-contiguous");
-  assert.equal(demResolutionQueryValue("auto"), "auto");
-  assert.equal(demResolutionQueryValue("target-1m"), 1);
-  assert.equal(demResolutionQueryValue("target-3m"), 3);
-  assert.equal(demResolutionQueryValue("target-10m"), 10);
-  assert.equal(demResolutionModeLabel("best-available"), "Best available");
+const coverage = (datasets: Array<[number, number]>) => {
+  const sizes = datasets.map(([size]) => size);
+  const count = datasets.reduce((sum, [, samples]) => sum + samples, 0);
+  return {
+    min_pixel_size_m: Math.min(...sizes),
+    max_pixel_size_m: Math.max(...sizes),
+    covered_sample_count: count,
+    total_sample_count: count,
+    mixed_resolution: Math.max(...sizes) - Math.min(...sizes) > 0.01,
+    datasets: datasets.map(([pixel_size_m, sample_count]) => ({ pixel_size_m, source: "USGS 3DEP", product_name: "x", dataset_id: null, sample_count })),
+  };
+};
+
+test("a path on 1 m lidar says so", () => {
+  const metadata = usgsProfileMetadata(coverage([[1, 900]]));
+  assert.equal(formatDemResolution(metadata), "1 m");
+  assert.match(demQualityNote(metadata), /All of this path is on USGS 1 m lidar/);
 });
 
-test("Terrain3D sample resolution is not mislabeled as native source DEM resolution", () => {
-  const sampled = summarizeDemResolution([
-    { demResolution: 2.388657133974685 },
-    { demResolution: 2.388657133974685 },
-  ], "best-available");
-
-  assert.equal(formatTerrainSamplingResolution(sampled), "2.39 m");
-  assert.equal(formatDemResolution(sampled), "Unavailable");
-
-  const withCoverage = withDemSourceCoverage(sampled, {
-    min_pixel_size_m: 10.30736,
-    max_pixel_size_m: 10.30736,
-    covered_sample_count: 2,
-    total_sample_count: 2,
-    mixed_resolution: false,
-    datasets: [{
-      pixel_size_m: 10.30736,
-      source: "USGS",
-      product_name: "NED_1r3_arcsec",
-      dataset_id: "NED13",
-      sample_count: 2,
-    }],
-  });
-
-  assert.equal(formatDemResolution(withCoverage), "10.3 m");
-  assert.equal(formatTerrainSamplingResolution(withCoverage), "2.39 m");
+test("a path that crosses onto a coarser source says how much of each", () => {
+  const metadata = usgsProfileMetadata(coverage([[1, 750], [10.308, 250]]));
+  assert.equal(formatDemResolution(metadata), "1 m–10 m");
+  assert.match(demQualityNote(metadata), /75% 1 m lidar, 25% about 10 m/);
+  assert.match(demQualityNote(metadata), /finest USGS has/);
 });
 
-test("DEM source coverage truthfully reports a mixed native-resolution path", () => {
-  const sampled = summarizeDemResolution([
-    { demResolution: 2.388657133974685 },
-    { demResolution: 2.388657133974685 },
-  ], "auto");
-  const metadata = withDemSourceCoverage(sampled, {
-    min_pixel_size_m: 0.5,
-    max_pixel_size_m: 10.30736,
-    covered_sample_count: 2,
-    total_sample_count: 2,
-    mixed_resolution: true,
-    datasets: [],
-  });
-
-  assert.equal(formatDemResolution(metadata), "0.50 m–10.3 m");
-  assert.equal(formatTerrainSamplingResolution(metadata), "2.39 m");
+test("when USGS cannot say what lies under a path, the screen does not pretend", () => {
+  const metadata = usgsProfileMetadata();
+  assert.equal(formatDemResolution(metadata), "Unavailable");
+  assert.match(demQualityNote(metadata), /could not say/);
+  assert.equal(formatDemResolution(null), "Unavailable");
 });
 
 test("control point distances accumulate along a multi-vertex path", () => {
@@ -95,7 +70,7 @@ test("control point distances accumulate along a multi-vertex path", () => {
 });
 
 test("profile derives distance, gain, loss, grade, and elevation range", () => {
-  const dem = summarizeDemResolution([{ demResolution: 1 }, { demResolution: 1 }, { demResolution: 1 }], "best-available");
+  const dem = usgsProfileMetadata();
   const profile = profileFromPath([
     [-121.0, 38.0, 100],
     [-121.0, 38.001, 125],
@@ -112,8 +87,7 @@ test("profile derives distance, gain, loss, grade, and elevation range", () => {
   assert.equal(profile.samples[0].grade_percent, null);
   assert.ok((profile.samples[1].grade_percent ?? 0) > 0);
   assert.ok((profile.samples[2].grade_percent ?? 0) < 0);
-  assert.equal(profile.dem?.requested_mode, "best-available");
-  assert.equal(profile.dem?.actual_min_resolution_m, 1);
+  assert.equal(profile.dem?.source, "USGS_3DEP");
 });
 
 test("profile discards no-data elevation vertices", () => {

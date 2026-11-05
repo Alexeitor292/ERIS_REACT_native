@@ -182,6 +182,10 @@ public final class OfflineStore: @unchecked Sendable {
     /// A server answer kept under a name ("assessments/5", "work/assignee").
     public func keep(_ data: Data, as name: String) { write(data, to: "copies/\(name).json") }
     public func copy(named name: String) -> Copy? { copy("copies/\(name).json") }
+    /// Drops the copies whose names start this way.
+    public func removeCopies(startingWith prefix: String) {
+        for name in names(in: "copies") where name.hasPrefix(prefix) { remove("copies/\(name)") }
+    }
 
     /// A form's photo, kept so it shows without a connection.
     public func keepFile(_ attachmentId: Int, _ data: Data) { write(data, to: "files/\(attachmentId)") }

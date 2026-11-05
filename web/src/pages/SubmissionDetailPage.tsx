@@ -49,7 +49,6 @@ import {
   serializeDistrictContacts,
   textValue as t,
   triToBool,
-  tryExtractRoute,
   type DashboardCardId,
   type DistrictContact,
   type IncidentTypeOption,
@@ -64,6 +63,7 @@ import {
 } from "../utils/californiaCoordinateSystem";
 import { buildSubmissionDisplayTitle } from "../utils/submissionLabel";
 import { CALIFORNIA_COUNTIES, CALTRANS_DISTRICTS, countiesForDistrict, countyCodeFromNameOrCode, countyNameFromNameOrCode, districtForCounty, routesForDistrictCounty } from "../utils/caltransLookups";
+import { resolveCoordinates } from "../features/incidents/caltransPostmileClient";
 import { formatCoordinate, normalizeCoordinateValue, normalizePostMileInput, normalizePostMileValue, normalizeRouteInput, normalizeRouteValue } from "../utils/precision";
 import { isAssessmentAuthor, isOperationalUser, isPublicOnly } from "../utils/roleModel";
 import ActionChecklist from "../features/submissions/ActionChecklist";
@@ -871,25 +871,16 @@ export default function SubmissionDetailPage() {
 
       setDraft((prev) => ({ ...prev, latitude: formatCoordinate(lat), longitude: formatCoordinate(lon) }));
 
-      const reverseUrl =
-        `https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/reverseGeocode?` +
-        `location=${encodeURIComponent(`${lon},${lat}`)}&f=pjson&langCode=en`;
-      const geocodeRes = await fetch(reverseUrl);
-      if (!geocodeRes.ok) return;
-      const geocode = await geocodeRes.json();
-      const addr = geocode?.address ?? {};
-      const countyRaw = String(addr.Subregion ?? addr.County ?? "").trim();
-      const county = countyRaw ? normalizeCounty(countyRaw) : "";
-      const districtGuess = districtForCounty(county);
-      const routeGuess = tryExtractRoute(
-        [addr.StreetName, addr.Match_addr, addr.LongLabel, addr.ShortLabel].filter(Boolean).join(" ")
-      );
-
+      // The Caltrans postmile layer, not Esri's geocoder: what fills the form gets saved, and
+      // Esri forbids storing results of a request like this one.
+      const road = await resolveCoordinates(lat, lon);
+      if (!road) return;
+      const county = normalizeCounty(road.county);
       setDraft((prev) => ({
         ...prev,
         county: county || prev.county,
-        district: districtGuess || prev.district,
-        route: routeGuess || prev.route,
+        district: normalizeDistrictValue(road.district) || districtForCounty(county) || prev.district,
+        route: road.route || prev.route,
       }));
     } catch {
       // keep lat/lon if available; silent fallthrough with generic error

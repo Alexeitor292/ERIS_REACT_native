@@ -60,6 +60,6 @@ test("terrain slice rejects incomplete elevation responses instead of inventing 
   const sampled = grid.points.slice(0, -1).map((point) => [point.longitude, point.latitude, 100]);
   assert.throws(
     () => terrainSliceFromSampledPoints(grid, sampled),
-    /unexpected terrain slice sample count/,
+    /unexpected number of terrain slice samples/,
   );
 });

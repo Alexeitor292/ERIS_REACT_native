@@ -8,6 +8,7 @@ import Point from "@arcgis/core/geometry/Point";
 import Extent from "@arcgis/core/geometry/Extent";
 
 import type { Incident } from "../api/types";
+import { basemapForTheme, useThemeBasemap } from "./mapTheme";
 import { attachTerrainSourceBadge } from "./terrainSourceBadge";
 
 type Props = {
@@ -41,9 +42,11 @@ export default function MissionCenterMap({
   const viewRef = useRef<MapView | null>(null);
   const layerRef = useRef<GraphicsLayer | null>(null);
 
+  const envApiKey = (import.meta as any)?.env?.VITE_ARCGIS_API_KEY;
+  useThemeBasemap(viewRef, !!envApiKey);
+
   useEffect(() => {
     esriConfig.assetsPath = "/assets";
-    const envApiKey = (import.meta as any)?.env?.VITE_ARCGIS_API_KEY;
     if (envApiKey) {
       esriConfig.apiKey = String(envApiKey);
     }
@@ -53,8 +56,7 @@ export default function MissionCenterMap({
     layerRef.current = layer;
 
     const map = new Map({
-      // Prefer OSM so Mission Center remains visible without ArcGIS key wiring.
-      basemap: "osm",
+      basemap: basemapForTheme(!!envApiKey),
       layers: [layer],
     });
 
@@ -69,7 +71,8 @@ export default function MissionCenterMap({
     });
     const detachTerrainSource = attachTerrainSourceBadge(view);
 
-    // Defensive fallback: if a styled basemap fails for any reason, force OSM.
+    // If the basemap fails (an expired key, say), OSM keeps the map usable until it is fixed.
+    // Only for that: OSM's tile servers do not take regular production use.
     view.when().catch(() => {
       try {
         view.map = new Map({ basemap: "osm", layers: [layer] });

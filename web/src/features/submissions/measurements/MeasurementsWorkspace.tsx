@@ -27,7 +27,7 @@ const fmtFt = (m: number) => `${Math.round(m * FT_PER_M).toLocaleString("en-US")
 const fmtYd3 = (m3: number) => `${Math.round(m3 * YD3_PER_M3).toLocaleString("en-US")} yd³`;
 const fmtChangeFt = (m: number) => `${(m * FT_PER_M).toFixed(1)} ft`;
 const fmtRes = (r: { min: number; max: number } | null) =>
-  !r ? "resolution not reported" : Math.abs(r.max - r.min) < 0.01 ? `${+r.min.toFixed(1)} m DEM` : `${+r.min.toFixed(1)}–${+r.max.toFixed(1)} m DEM`;
+  !r ? "resolution not reported" : Math.abs(r.max - r.min) < 0.01 ? `read every ${+r.min.toFixed(1)} m` : `${+r.min.toFixed(1)}–${+r.max.toFixed(1)} m DEM`;
 
 const button = "inline-flex min-h-11 items-center justify-center gap-1.5 rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 text-sm font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50";
 const primary = "inline-flex min-h-11 items-center justify-center gap-1.5 rounded-md bg-[var(--brand)] px-4 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50";
@@ -469,8 +469,8 @@ function TerrainFacts({ measuring }: { measuring: SiteMeasurementState }) {
         <Fact label="Plan length" value={fmtFt(m.horizontalLengthM)} note={`${fmtFt(m.slopeLengthM)} along the slope`} />
         <Fact
           label="Source"
-          value="Esri World Elevation"
-          note={[terrain ? terrainSourceText(terrain).replace(/^Esri World Elevation /, "") : null, fmtRes(current.resolution)].filter(Boolean).join(" · ")}
+          value="USGS 3DEP"
+          note={[terrain ? terrainSourceText(terrain).replace(/^USGS 3DEP /, "") : null, fmtRes(current.resolution)].filter(Boolean).join(" · ")}
         />
       </dl>
     </>
