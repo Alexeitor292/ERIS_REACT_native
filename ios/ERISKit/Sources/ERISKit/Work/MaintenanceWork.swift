@@ -84,6 +84,15 @@ public struct MaintenanceWorkflow: Decodable, Equatable, Sendable {
         public let fullName: String
         public let isActive: Bool?
         enum CodingKeys: String, CodingKey { case id, fullName = "full_name", isActive = "is_active" }
+
+        public init(from decoder: Decoder) throws {
+            let fields = try decoder.container(keyedBy: CodingKeys.self)
+            id = try fields.decode(Int.self, forKey: .id)
+            fullName = try fields.decode(String.self, forKey: .fullName)
+            // Earlier servers send the database's 0 or 1; a person's status must not stop the report opening.
+            isActive = (try? fields.decodeIfPresent(Bool.self, forKey: .isActive))
+                ?? (try? fields.decodeIfPresent(Int.self, forKey: .isActive)).flatMap { $0 }.map { $0 != 0 }
+        }
     }
 
     public struct Event: Decodable, Equatable, Identifiable, Sendable {

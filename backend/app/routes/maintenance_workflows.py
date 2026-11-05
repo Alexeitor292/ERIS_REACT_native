@@ -119,7 +119,8 @@ def _payload(db, incident, workflow, user):
     return {"incident_id": incident["id"], "district": workflow["district"], "revision": workflow["revision"],
             "version": workflow["version"], "state": state, "outcome": workflow["outcome"], "step": step,
             "steps": [{"name": s["name"], "kind": s["kind"]} for s in definition["steps"]],
-            "assigned": [dict(p) for p in assigned], "events": [dict(e) for e in events], "groups": [dict(g) for g in groups],
+            # The database's 0 or 1 as true or false: the iPhone cannot read this answer otherwise.
+            "assigned": [{**p, "is_active": bool(p["is_active"])} for p in assigned], "events": [dict(e) for e in events], "groups": [dict(g) for g in groups],
             "can_act": not workflow["outcome"] and not state["waiting_reporter"] and uid in assigned_ids and uid not in state["approved_user_ids"],
             "can_edit": not workflow["outcome"] and (uid == incident["reporter_user_id"] or mw.capability(definition, uid, "edit_report")),
             "can_resubmit": not workflow["outcome"] and state["waiting_reporter"] and uid == incident["reporter_user_id"],

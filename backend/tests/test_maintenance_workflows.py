@@ -285,6 +285,14 @@ def test_only_assigned_records_appear_in_queue(db, plan):
     assert not routes.work(db, user(4))["items"][0]["reported_by_me"]
 
 
+def test_assigned_people_say_true_or_false_because_the_iphone_cannot_read_0_or_1(db, plan):
+    start(db, plan)
+    people = routes.detail(10, db, user(4))["assigned"]
+    assert people and all(person["is_active"] is True for person in people)
+    db.execute(text("UPDATE users SET is_active = 0 WHERE id = :id"), {"id": people[0]["id"]})
+    assert routes.detail(10, db, user(4))["assigned"][0]["is_active"] is False
+
+
 def test_notification_only_workflow_members_have_their_own_feed(db, plan):
     publish(db, plan)
     from app.routes.notifications import notification_user

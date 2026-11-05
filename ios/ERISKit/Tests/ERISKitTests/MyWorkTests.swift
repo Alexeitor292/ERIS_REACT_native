@@ -102,6 +102,10 @@ final class TriageTests: XCTestCase {
     }
 }
 
+private struct NoTransport: HTTPTransport {
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) { throw URLError(.badURL) }
+}
+
 final class MaintenanceWorkTests: XCTestCase {
     private func workflow(_ extra: String = "", step: String = #"{"name": "Supervisor review", "kind": "REVIEW", "rule": "ALL", "request_information": true, "allow_maintenance": true, "allow_geotech": false}"#,
                           state: String = #"{"step_index": 0, "approved_user_ids": [], "waiting_reporter": false}"#,
@@ -115,6 +119,30 @@ final class MaintenanceWorkTests: XCTestCase {
          "groups": [{"id": 3, "title": "I-880 slides"}],
          "can_act": \(canAct), "can_edit": false, "can_resubmit": false, "can_restart": true \(extra)}
         """.utf8))
+    }
+
+    /// What the server sent for a report at a final decision, which build 4 could not read:
+    /// "Something went wrong. Try again." on opening it. The demo server always sent true.
+    func testAReportOpensWhetherAPersonsStatusComesAsTrueOrAsOne() throws {
+        func read(_ active: String) throws -> MaintenanceWorkflow {
+            try APIClient(baseURL: URL(string: "https://eris.test/api")!, store: MemorySessionStore(token: "t"), transport: NoTransport())
+                .decode(MaintenanceWorkflow.self, from: Data("""
+                {"incident_id": 41, "district": "04", "revision": 1, "version": 1,
+                 "state": {"step_index": 0, "approved_user_ids": [], "waiting_reporter": false}, "outcome": null,
+                 "step": {"name": "Maintenance or GeoTech decision", "kind": "DECISION", "duty_ids": ["decision"], "notify_duty_ids": [],
+                          "rule": "ANY", "request_information": true, "allow_maintenance": true, "allow_geotech": true},
+                 "steps": [{"name": "Maintenance or GeoTech decision", "kind": "DECISION"}],
+                 "assigned": [{"id": 3, "full_name": "A Person", \(active)}],
+                 "events": [{"id": 9, "action": "REPORTED", "step_index": 0, "notes": null, "created_at": "2026-11-04T12:00:00", "actor_name": "A"}],
+                 "groups": [{"id": 2, "title": "Storm"}],
+                 "can_act": true, "can_edit": true, "can_resubmit": false, "can_restart": false}
+                """.utf8), preservingKeys: true)
+        }
+        XCTAssertEqual(try read(#""is_active": true"#).assigned[0].isActive, true)
+        XCTAssertEqual(try read(#""is_active": 1"#).assigned[0].isActive, true)
+        XCTAssertEqual(try read(#""is_active": 0"#).assigned[0].isActive, false)
+        XCTAssertNil(try read(#""is_active": null"#).assigned[0].isActive)
+        XCTAssertEqual(try read(#""is_active": 1"#).actions, [.maintenance, .geotech, .requestInformation, .edit])
     }
 
     func testTheActionsOfferedFollowTheStepAsTheWebPanelDoes() throws {
