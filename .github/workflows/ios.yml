@@ -105,14 +105,14 @@ jobs:
           plutil -lint "$RUNNER_TEMP/ERIS-derived-data/Build/Products/$CONFIGURATION-iphonesimulator/ERIS.app/PrivacyInfo.xcprivacy"
       - name: Upload the build log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: xcodebuild-log-${{ matrix.configuration }}
           path: build-*.log
           if-no-files-found: ignore
       - name: Upload the generated project for review
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: generated-xcode-project-${{ matrix.configuration }}
           path: ios/ERIS.xcodeproj
