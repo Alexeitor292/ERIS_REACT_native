@@ -45,6 +45,7 @@
 		D0DE8754749DC291E96E08CE /* MyWorkViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC4149C7E2F9CEBC13F5FD24 /* MyWorkViews.swift */; };
 		E22FC303390E4D23BCCBB6E3 /* SubmissionViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B24DB41A2A1AA31C2ADA284A /* SubmissionViews.swift */; };
 		E99F0128179AEA6F9BD27EFA /* SketchpadViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C79A78C23480075CFA148688 /* SketchpadViews.swift */; };
+		E9A35E1E70D3F7D7C213AFFD /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 8A7C983C73F8446FC7DE15DE /* PrivacyInfo.xcprivacy */; };
 		F46F4D31428D1E2930B3DAC8 /* SplashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5367D2DACD4A77222E5BC39B /* SplashView.swift */; };
 		FB5032090EC572A17F792936 /* MSALTokenProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 947DB096C5A7E07D59F63717 /* MSALTokenProvider.swift */; };
 		FDC62F41A7DD0E74C473E711 /* ERISApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A85ADD49DC017F3F55EB8E19 /* ERISApp.swift */; };
@@ -79,6 +80,7 @@
 		78A78EA181A9E18B45A8EC80 /* AssessmentViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssessmentViews.swift; sourceTree = "<group>"; };
 		8179064C0312B2FDA75A3216 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		827616E660C0B94B84C77CCF /* MapViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapViews.swift; sourceTree = "<group>"; };
+		8A7C983C73F8446FC7DE15DE /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		8FB17402AE2FC47CD9018576 /* FormCollabViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormCollabViews.swift; sourceTree = "<group>"; };
 		90C1617C9169B704B9433F21 /* DemoWork.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoWork.swift; sourceTree = "<group>"; };
 		92AA8EDC99BC32A3CF3C4C80 /* RoadData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoadData.swift; sourceTree = "<group>"; };
@@ -221,6 +223,7 @@
 			isa = PBXGroup;
 			children = (
 				C4BBDF6C696D17CE2A57F5E1 /* Assets.xcassets */,
+				8A7C983C73F8446FC7DE15DE /* PrivacyInfo.xcprivacy */,
 				9CB74D24D3B4FCC512E32303 /* App */,
 				1D1C589ED65070065F2FAC80 /* Platform */,
 				B5CFBC7CAAC14AF895D006A3 /* Resources */,
@@ -320,6 +323,7 @@
 			files = (
 				74DFDD6D0707CC1ED7EE68AB /* Assets.xcassets in Resources */,
 				75EAC41924E978AFD6FA8540 /* MemoEditor.html in Resources */,
+				E9A35E1E70D3F7D7C213AFFD /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

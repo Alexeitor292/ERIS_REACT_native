@@ -15,6 +15,7 @@ jobs:
   images:
     name: Image ${{ matrix.name }} (build, SBOM, all-severity scan)
     runs-on: ubuntu-26.04
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -26,13 +27,16 @@ jobs:
           - {name: seaweedfs, dockerfile: deploy/images/Dockerfile.seaweedfs, context: .}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Build candidate from this exact source, refreshing OS packages
         run: >-
-          docker build --pull --no-cache --label org.opencontainers.image.revision=${{ github.sha }}
+          docker build --pull --no-cache --label org.opencontainers.image.revision=${{ github.event.pull_request.head.sha || github.sha }}
           -f ${{ matrix.dockerfile }} -t localhost/eris/${{ matrix.name }}:candidate ${{ matrix.context }}
       - name: Record exact identity and export test candidate
         run: |
           mkdir -p "$RUNNER_TEMP/evidence"
+          git rev-parse HEAD > "$RUNNER_TEMP/evidence/source-commit.txt"
           docker image inspect --format '{{.Id}}' localhost/eris/${{ matrix.name }}:candidate > "$RUNNER_TEMP/evidence/image-id.txt"
           docker save localhost/eris/${{ matrix.name }}:candidate | gzip -1 > "$RUNNER_TEMP/evidence/${{ matrix.name }}.tar.gz"
       - name: Generate SBOM and fail on any known vulnerability or embedded secret
@@ -40,7 +44,27 @@ jobs:
           TRIVY: aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb
         run: |
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$RUNNER_TEMP/evidence:/evidence" -v "$RUNNER_TEMP/trivy:/cache" "$TRIVY" --cache-dir /cache image --format cyclonedx --output /evidence/sbom.cdx.json localhost/eris/${{ matrix.name }}:candidate
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$RUNNER_TEMP/evidence:/evidence" -v "$RUNNER_TEMP/trivy:/cache" "$TRIVY" --cache-dir /cache image --scanners vuln,secret --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL --exit-code 1 --format json --output /evidence/scan.json localhost/eris/${{ matrix.name }}:candidate
+          gate=0
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$RUNNER_TEMP/evidence:/evidence" -v "$RUNNER_TEMP/trivy:/cache" "$TRIVY" --cache-dir /cache image --scanners vuln,secret --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL --exit-code 1 --format json --output /evidence/scan.json localhost/eris/${{ matrix.name }}:candidate || gate=$?
+          python3 - "$RUNNER_TEMP/evidence/scan.json" <<'PY'
+          import json, sys
+          report = json.load(open(sys.argv[1]))
+          for result in report.get("Results", []):
+              for finding in result.get("Vulnerabilities", []):
+                  print(result["Target"], finding["VulnerabilityID"], finding["PkgName"], finding["InstalledVersion"], "fixed=" + finding.get("FixedVersion", "none"), finding["Severity"])
+              for finding in result.get("Secrets", []):
+                  print("Embedded secret:", result["Target"], finding.get("RuleID"), finding.get("Severity"))
+          PY
+          exit "$gate"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: report-${{ matrix.name }}
+          path: |
+            ${{ runner.temp }}/evidence/*.json
+            ${{ runner.temp }}/evidence/*.txt
+          if-no-files-found: ignore
+          retention-days: 30
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -48,9 +72,11 @@ jobs:
           path: ${{ runner.temp }}/evidence/
           if-no-files-found: ignore
           retention-days: 14
+          compression-level: 0
   podman:
     name: Release regressions and real rootless secrets
     runs-on: ubuntu-26.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Verify supported Podman and rootless mapping
@@ -65,3 +91,40 @@ jobs:
           bash deploy/ci/tests/test-publish-release.sh
       - name: Real rootless private secret permissions and rotation
         run: bash deploy/podman/tests/test-native-secrets.sh
+  rehearsal:
+    name: Five-image rootless installation and recovery
+    needs: [images, podman]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: candidate-*
+          path: ${{ runner.temp }}/candidates
+      - name: Load the exact candidates built and scanned above
+        run: |
+          for name in api worker web mariadb seaweedfs; do
+            test "$(cat "$RUNNER_TEMP/candidates/candidate-$name/source-commit.txt")" = "$(git rev-parse HEAD)"
+            gzip -dc "$RUNNER_TEMP/candidates/candidate-$name/$name.tar.gz" | podman load
+          done
+      - name: Fresh installation, native secret, signed files and matched restore
+        env:
+          ERIS_TEST_API_IMAGE: localhost/eris/api:candidate
+          ERIS_TEST_WORKER_IMAGE: localhost/eris/worker:candidate
+          ERIS_TEST_WEB_IMAGE: localhost/eris/web:candidate
+          ERIS_TEST_DB_IMAGE: localhost/eris/mariadb:candidate
+          ERIS_TEST_STORAGE_IMAGE: localhost/eris/seaweedfs:candidate
+        run: |
+          set -o pipefail
+          bash deploy/podman/tests/test-rootless-rehearsal.sh 2>&1 | tee "$RUNNER_TEMP/rehearsal.log"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rootless-rehearsal
+          path: ${{ runner.temp }}/rehearsal.log
+          if-no-files-found: ignore
+          retention-days: 30

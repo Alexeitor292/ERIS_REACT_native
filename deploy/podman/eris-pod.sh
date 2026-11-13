@@ -225,7 +225,9 @@ case "${1:-}" in
       exit 2
     fi
     trap 'rmdir "$DEPLOY/.release.lock" 2>/dev/null || true' EXIT
-    stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    # Fast successive releases must never reuse a pre-release backup or rollback
+    # volume name just because they began in the same wall-clock second.
+    stamp="$(date -u +%Y%m%dT%H%M%SZ)-$$"
     new_api="$(sed -n 's/^ERIS_API_IMAGE=//p' "$file")"
     staged="$(mktemp)"
     cp "$file" "$staged"

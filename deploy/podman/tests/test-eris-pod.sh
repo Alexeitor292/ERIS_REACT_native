@@ -63,7 +63,14 @@ case "$1 ${2:-}" in
 esac
 STUB
 printf '#!/usr/bin/env bash\nif grep -qs "@sha256:dead" "$STATE/api_image"; then exit 22; fi\nexit 0\n' > "$work/bin/curl"
-chmod +x "$work/bin/podman" "$work/bin/curl"
+# Keep release wall-clock time constant: backup and rollback names must remain
+# unique even when several releases start in the same second.
+export ERIS_TEST_REAL_DATE="$(command -v date)"
+cat > "$work/bin/date" <<'STUB'
+#!/usr/bin/env bash
+if [[ "$*" == '-u +%Y%m%dT%H%M%SZ' ]]; then echo 20261113T120000Z; else exec "$ERIS_TEST_REAL_DATE" "$@"; fi
+STUB
+chmod +x "$work/bin/podman" "$work/bin/curl" "$work/bin/date"
 export PATH="$work/bin:$PATH" STATE="$work/state"
 
 ok() { echo "ok - $*"; passed=$((passed + 1)); }
