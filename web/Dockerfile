@@ -40,7 +40,7 @@ ENV VITE_GOOGLE_MAPS_EMBED_KEY=$VITE_GOOGLE_MAPS_EMBED_KEY
 # `tsc && vite build` does not OOM in the container's default Node heap.
 RUN NODE_OPTIONS=--max-old-space-size=4096 npm run build
 
-FROM nginx:1.30.6-alpine@sha256:901e593c95dc85f5a729f5765516321366ef4ac401821431d408897e95287d0a
+FROM nginx:1.31.7-alpine@sha256:892bb2152464f0c5d8972593a5f5afaf8054552580b699d95f8ff4af08c2d33d
 # Keep configuration/static assets owned by root. Only nginx's runtime state
 # directories are writable by UID101; the listener uses an unprivileged port.
 RUN apk upgrade --no-cache \
