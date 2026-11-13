@@ -94,31 +94,47 @@ fi
 # --- Image signatures ----------------------------------------------------------
 # Podman enforces cosign signatures at pull time when the service account's
 # policy requires them for the Harbor project (deploy/podman/signature-policy).
-policy_file="${XDG_CONFIG_HOME:-$HOME/.config}/containers/policy.json"
+# containers/image resolves policy.json under HOME, independently of XDG_CONFIG_HOME.
+# Inspect the same file Podman actually uses, not an unused strict-looking file.
+policy_file="$HOME/.config/containers/policy.json"
 [[ -f "$policy_file" ]] || policy_file=/etc/containers/policy.json
-declare -A required_prefixes=()
-while IFS= read -r ref; do
-  [[ "$ref" == */* ]] && required_prefixes["${ref%/*}"]=1
-done < <(sed -nE 's/^ERIS_(API|WORKER|WEB|DB|STORAGE)_IMAGE=//p' "$images_env" 2>/dev/null)
-[[ "${#required_prefixes[@]}" -gt 0 ]] || gate "no image repository prefixes found for signature verification"
-for repo_prefix in "${!required_prefixes[@]}"; do
-if [[ -f "$policy_file" ]] && python3 - "$policy_file" "$repo_prefix" <<'PY'
+mapfile -t required_refs < <(sed -nE 's/^ERIS_(API|WORKER|WEB|DB|STORAGE)_IMAGE=//p' "$images_env" 2>/dev/null)
+policy_report=""
+if [[ -f "$policy_file" ]] && policy_report="$(python3 - "$policy_file" "${required_refs[@]}" <<'PY'
 import json, os, sys
+ref = "all five images"
 try:
     policy = json.load(open(sys.argv[1]))
-    rules = policy.get("transports", {}).get("docker", {}).get(sys.argv[2], [])
     assert policy.get("default") == [{"type": "reject"}]
-    assert rules and all(r.get("type") == "sigstoreSigned" and os.path.isabs(r.get("keyPath", ""))
-                         and os.path.isfile(r["keyPath"]) for r in rules)
-except (OSError, ValueError, AssertionError, TypeError, AttributeError):
+    scopes = policy.get("transports", {}).get("docker", {})
+    assert len(sys.argv[2:]) == 5
+    for ref in sys.argv[2:]:
+        host = ref.split("/", 1)[0]
+        assert "/" in ref and ("." in host or ":" in host or host == "localhost")
+        repository = ref.split("@", 1)[0]
+        if ":" in repository.rsplit("/", 1)[-1]: repository = repository.rsplit(":", 1)[0]
+        # containers/image checks exact identity, repository, parents, registry,
+        # transport default, then the global default. A permissive image rule
+        # must not be hidden by a strict project-prefix rule.
+        candidates = [ref, repository]
+        while "/" in repository:
+            repository = repository.rsplit("/", 1)[0]
+            candidates.append(repository)
+        rules = next((scopes[scope] for scope in candidates if scope in scopes), scopes.get("", policy["default"]))
+        assert rules and all(r.get("type") == "sigstoreSigned" and os.path.isabs(r.get("keyPath", ""))
+                             and os.path.isfile(r["keyPath"])
+                             and r.get("signedIdentity") == {"type": "matchRepository"}
+                             and set(r) <= {"type", "keyPath", "signedIdentity"} for r in rules)
+except (OSError, ValueError, AssertionError, TypeError, AttributeError, KeyError):
+    print(ref)
     sys.exit(1)
 PY
+)"
 then
-  pass "Podman requires cosign signatures for $repo_prefix ($policy_file)"
+  pass "Podman requires repository-matched cosign signatures for all five images ($policy_file)"
 else
-  gate "no Podman signature policy requires signatures for $repo_prefix"
+  gate "no Podman signature policy requires repository-matched signatures for ${policy_report:-all five images}"
 fi
-done
 
 # --- Host exposure -----------------------------------------------------------
 ports="$(podman pod inspect --format '{{json .InfraConfig.PortBindings}}' eris 2>/dev/null || true)"

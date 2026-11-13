@@ -40,6 +40,13 @@ jobs:
         run: >-
           docker run --rm --network none -e DB_PASS=ci_placeholder -e JWT_SECRET=ci_placeholder -e S3_ACCESS_KEY=ci_s3_access -e S3_SECRET_KEY=ci_s3_secret
           localhost/eris/api:candidate python -c "import pytest; import app.asgi; import importlib.util; assert importlib.util.find_spec('pip') is None"
+      - name: Exact API upload, SMTP and SQL security regressions
+        if: matrix.name == 'api'
+        run: >-
+          docker run --rm --network none -e ENV=dev -e DB_PASS=ci_placeholder
+          -e JWT_SECRET=ci_placeholder_secret -e S3_ACCESS_KEY=ci_s3_access -e S3_SECRET_KEY=ci_s3_secret
+          -v "$PWD/backend/tests:/app/tests:ro" localhost/eris/api:candidate
+          python -m pytest tests/test_photo_upload_limits.py tests/test_notification_smtp.py tests/test_sql_parameterization.py -q
       - name: Exact worker GeoTIFF and GDAL/PROJ projection
         if: matrix.name == 'worker'
         run: |

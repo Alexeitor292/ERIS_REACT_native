@@ -95,7 +95,7 @@ python3 - "$work/home/.config/containers/policy.json" "$work/k.pub" <<'PY'
 import json, sys, subprocess, os
 paths = sys.argv[1:]
 if os.name == 'nt': paths = [subprocess.check_output(['cygpath', '-w', p], text=True).strip() for p in paths]
-with open(paths[0], 'w') as out: json.dump({'default': [{'type': 'reject'}], 'transports': {'docker': {'harbor.test/eris': [{'type': 'sigstoreSigned', 'keyPath': paths[1]}]}}}, out)
+with open(paths[0], 'w') as out: json.dump({'default': [{'type': 'reject'}], 'transports': {'docker': {'harbor.test/eris': [{'type': 'sigstoreSigned', 'keyPath': paths[1], 'signedIdentity': {'type': 'matchRepository'}}]}}}, out)
 PY
 export HOME="$work/home" XDG_CONFIG_HOME="$work/home/.config"
 export PATH="$work/bin:$PATH"
@@ -120,6 +120,20 @@ expect_fail_line() {
 expect_pass "a handed-over deployment passes"
 check "reports password sign-in disabled" -- grep -q "^PASS password sign-in is disabled" "$work/out"
 ERIS_VERIFY_PROFILE=production expect_pass "a pinned, Entra-only, handed-over deployment passes the production profile"
+cp "$work/home/.config/containers/policy.json" "$work/policy.original"
+python3 - "$work/home/.config/containers/policy.json" <<'PY'
+import json,sys
+path=sys.argv[1]; policy=json.load(open(path)); policy['transports']['docker']['harbor.test/eris/api']=[{'type':'insecureAcceptAnything'}]
+with open(path,'w') as out: json.dump(policy,out)
+PY
+ERIS_VERIFY_PROFILE=production expect_fail_line "an insecure image override cannot hide behind a strict project policy" "no Podman signature policy.*harbor.test/eris/api"
+python3 - "$work/home/.config/containers/policy.json" <<'PY'
+import json,sys
+path=sys.argv[1]; policy=json.load(open(path)); scopes=policy['transports']['docker']; scopes['harbor.test/eris/api@sha256:'+'a'*64]=scopes['harbor.test/eris']
+with open(path,'w') as out: json.dump(policy,out)
+PY
+ERIS_VERIFY_PROFILE=production expect_pass "an exact image signature rule takes precedence over a repository override"
+cp "$work/policy.original" "$work/home/.config/containers/policy.json"
 sed -i 's|^ERIS_DB_IMAGE=harbor.test/eris/|ERIS_DB_IMAGE=harbor.test/unsigned/|' "$work/deploy/images.env"
 DB_IMAGE=harbor.test/unsigned/mariadb@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd ERIS_VERIFY_PROFILE=production \
   expect_fail_line "production requires signatures for every image repository prefix" "no Podman signature policy.*harbor.test/unsigned"
@@ -152,6 +166,10 @@ CERT_EXIT=1 ERIS_VERIFY_PROFILE=production expect_fail_line "production refuses 
 mv "$work/home/.config/containers/policy.json" "$work/policy.saved"
 expect_pass "a missing signature policy is only a warning in a rehearsal"
 ERIS_VERIFY_PROFILE=production expect_fail_line "production requires a signature policy" "no Podman signature policy"
+mkdir -p "$work/ignored-xdg/containers"
+cp "$work/policy.saved" "$work/ignored-xdg/containers/policy.json"
+XDG_CONFIG_HOME="$work/ignored-xdg" ERIS_VERIFY_PROFILE=production \
+  expect_fail_line "an unused XDG policy cannot certify Podman's HOME policy" "no Podman signature policy"
 mv "$work/policy.saved" "$work/home/.config/containers/policy.json"
 DOCS_CODE=200 expect_fail_line "public API docs fail" "/api/docs returned 200"
 BUCKET_CODE=200 expect_fail_line "a publicly listable bucket fails" "bucket must be private"

@@ -112,7 +112,16 @@ PY
 COSIGN_KEY_FILE="$work/keys/wrong.key" bash "$gate" sign "$wrong" "$work/synthetic.cdx.json"
 echo 'PASS real image signature, signed CycloneDX attestation and wrong-key verification rejection'
 
-python3 - "$work/config/containers/policy.json" "$registry/eris" "$work/keys/approved.pub" <<'PY'
+# Podman5's containers/image reads policy and registries.d from HOME/.config,
+# not XDG_CONFIG_HOME. Isolate BOTH paths, while retaining the existing storage
+# explicitly so changing HOME cannot silently choose another local image store.
+policy_home="$work/policy-home"
+mkdir -p "$policy_home/.config/containers/registries.d"
+policy_file="$policy_home/.config/containers/policy.json"
+IFS='|' read -r graph_root run_root storage_driver < <(
+  podman info --format '{{.Store.GraphRoot}}|{{.Store.RunRoot}}|{{.Store.GraphDriverName}}'
+)
+python3 - "$policy_file" "$registry/eris" "$work/keys/approved.pub" <<'PY'
 import json, sys
 policy = {'default': [{'type': 'reject'}], 'transports': {'docker': {sys.argv[2]: [
     {'type': 'sigstoreSigned', 'keyPath': sys.argv[3], 'signedIdentity': {'type': 'matchRepository'}}]}}}
@@ -120,12 +129,23 @@ with open(sys.argv[1], 'w') as handle:
     json.dump(policy, handle)
 PY
 printf 'docker:\n  "%s":\n    use-sigstore-attachments: true\n' "$registry" \
-  > "$work/config/containers/registries.d/eris.yaml"
-# Always pull: accepting an already-cached local image is not policy proof.
-podman pull --authfile "$REGISTRY_AUTH_FILE" --cert-dir "$work/certs" "$approved" >/dev/null
+  > "$policy_home/.config/containers/registries.d/eris.yaml"
+policy_pull() {
+  HOME="$policy_home" XDG_CONFIG_HOME="$policy_home/.config" \
+    podman --root "$graph_root" --runroot "$run_root" --storage-driver "$storage_driver" \
+    pull --policy=always --signature-policy "$policy_file" \
+    --authfile "$REGISTRY_AUTH_FILE" --cert-dir "$work/certs" "$1"
+}
+# A remote fetch and explicit policy are required; a cached image is not proof.
+for variant in approved wrong unsigned; do
+  podman image rm "$registry/eris/$variant:ci" >/dev/null
+done
+policy_pull "$approved" >/dev/null
 for ref in "$wrong" "$unsigned"; do
-  if podman pull --authfile "$REGISTRY_AUTH_FILE" --cert-dir "$work/certs" "$ref" > "$work/refused.log" 2>&1; then
-    echo 'FAIL Podman accepted an unsigned or wrong-signer image' >&2; exit 1
+  if policy_pull "$ref" > "$work/refused.log" 2>&1; then
+    echo "FAIL Podman signature policy accepted $ref" >&2
+    cat "$work/refused.log" >&2
+    exit 1
   fi
   grep -Eqi 'signature|policy|rejected' "$work/refused.log" || { cat "$work/refused.log" >&2; exit 1; }
 done
