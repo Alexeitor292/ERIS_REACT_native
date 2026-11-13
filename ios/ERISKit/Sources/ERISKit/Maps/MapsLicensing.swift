@@ -27,8 +27,8 @@ public enum MapsLicensing: Equatable, Sendable {
     /// What the ArcGIS SDK said of the license once set.
     public enum Outcome: Equatable, Sendable {
         case valid, expired
-        /// Not accepted: not a license string, or not one for this SDK (a 100.x
-        /// Runtime license does not license 200.x).
+        /// Not accepted: not a valid Runtime license string for this SDK.
+        /// 100.x/200.x Runtime strings are compatible; 300.x strings are separate.
         case invalid
     }
 

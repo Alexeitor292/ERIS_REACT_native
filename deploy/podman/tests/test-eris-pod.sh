@@ -17,11 +17,11 @@ SCRIPT="$work/repo/deploy/podman/eris-pod.sh"
 CONF="$work/repo/deploy/podman"
 write_config() {
   cat > "$CONF/images.env" <<EOF
-ERIS_API_IMAGE=harbor.test/eris/api@sha256:aaaa
-ERIS_WORKER_IMAGE=harbor.test/eris/worker@sha256:bbbb
-ERIS_WEB_IMAGE=harbor.test/eris/web@sha256:cccc
-ERIS_DB_IMAGE=harbor.test/eris/mariadb@sha256:dddd
-ERIS_STORAGE_IMAGE=harbor.test/eris/seaweedfs@sha256:eeee
+ERIS_API_IMAGE=harbor.test/eris/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ERIS_WORKER_IMAGE=harbor.test/eris/worker@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+ERIS_WEB_IMAGE=harbor.test/eris/web@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+ERIS_DB_IMAGE=harbor.test/eris/mariadb@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+ERIS_STORAGE_IMAGE=harbor.test/eris/seaweedfs@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 ERIS_REQUIRE_DIGESTS=true
 EOF
   printf 'MARIADB_PASSWORD=db-secret\n' > "$CONF/db.env"
@@ -56,6 +56,7 @@ case "$1 ${2:-}" in
   "run -d")
     if [[ "$*" == *"--name eris-api"* ]]; then echo "${@: -1}" > "$STATE/api_image"; fi ;;
   "run --rm") exit 0 ;;
+  "secret create") mkdir -p "$STATE/secrets"; cp "${@: -1}" "$STATE/secrets/${@: -2:1}" ;;
   "exec eris-mariadb") exit 0 ;;
   logs\ *) exit 0 ;;
   *) echo "unexpected podman $*" >&2; exit 99 ;;
@@ -87,6 +88,9 @@ sed -i 's|^ERIS_WEB_IMAGE=.*|ERIS_WEB_IMAGE=harbor.test/eris/web:release-7|' "$C
 expect_fail "tag references are refused when ERIS_REQUIRE_DIGESTS=true" bash "$SCRIPT" status
 check "the refusal names the unpinned image" -- grep -q "ERIS_WEB_IMAGE must be pinned by digest" "$work/out"
 write_config
+sed -i 's|^ERIS_WEB_IMAGE=.*|ERIS_WEB_IMAGE=harbor.test/eris/web@sha256:short|' "$CONF/images.env"
+expect_fail "a malformed digest is refused" bash "$SCRIPT" status
+write_config
 sed -i 's|^DB_PASS=.*|DB_PASS=CHANGE_ME|' "$CONF/app.env"
 expect_fail "example values are still refused" bash "$SCRIPT" status
 write_config
@@ -108,7 +112,7 @@ expect_ok "backup of a running pod" bash "$SCRIPT" backup "$backup"
 check "the pod is running again after the backup" -- grep -qx Running "$STATE/pod"
 check "the backup is cold (pod stopped first)" -- grep -q "^pod stop eris" "$STATE/calls"
 check "manifest records the schema revision" -- grep -qx "alembic_revision=20261028_user_sessions" "$backup/manifest.env"
-check "manifest records image references" -- grep -qx "ERIS_API_IMAGE=harbor.test/eris/api@sha256:aaaa" "$backup/manifest.env"
+check "manifest records image references" -- grep -qx "ERIS_API_IMAGE=harbor.test/eris/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$backup/manifest.env"
 check "config is captured" -- test -f "$backup/config/app.env"
 check "bootstrap secrets are not captured" -- test ! -e "$backup/config/bootstrap.env"
 if [[ "$(uname -s)" == Linux ]]; then
@@ -160,6 +164,15 @@ if [[ "$(uname -s)" == Linux ]]; then
   expect_ok "backup with a private secrets directory" bash "$SCRIPT" backup "$work/backups/with-secrets"
   check "the backup carries the Entra certificate" -- test -f "$work/backups/with-secrets/config/secrets/entra-client.crt"
   check "its checksum is recorded" -- grep -q "config/secrets/entra-client.crt" "$work/backups/with-secrets/SHA256SUMS"
+  rm "$STATE/pod"
+  expect_ok "startup maps private files as Podman secrets" bash "$SCRIPT" up
+  check "the API receives a UID10001 mode0400 secret" -- grep -q -- '--name eris-api.*--user 10001:10001.*--secret .*target=/run/secrets/eris/entra-client.crt,uid=10001,gid=10001,mode=0400' "$STATE/calls"
+  check "the worker never receives API secret mounts" -- bash -c '! grep -- "--name eris-worker" "$0" | grep -q -- "--secret"' "$STATE/calls"
+  printf 'rotated certificate' > "$CONF/secrets/entra-client.crt"
+  rm "$STATE/pod"
+  expect_ok "recreating the pod refreshes its native secrets" bash "$SCRIPT" up
+  check "the protected secret store receives current file contents" -- bash -c 'cmp -s "$0"/secrets/* "$1"' "$STATE" "$CONF/secrets/entra-client.crt"
+  check "host secret permissions remain 600" -- test "$(stat -c '%a' "$CONF/secrets/entra-client.crt")" = 600
   chmod 644 "$CONF/secrets/entra-client.crt"
   expect_fail "a readable secrets directory is refused" bash "$SCRIPT" status
   check "the refusal says to make it private" -- grep -q "must be private" "$work/out"
@@ -182,7 +195,7 @@ release_file() {  # release_file FILE API_DIGEST_PREFIX
   } > "$1"
 }
 echo Running > "$STATE/pod"
-printf 'ERIS_BACKUP_ROOT=%s\nERIS_PUBLIC_URL=\n' "$work/release-backups" > "$CONF/release.env"
+printf 'ERIS_BACKUP_ROOT=%s\nERIS_PUBLIC_URL=\nERIS_VERIFY_PROFILE=rehearsal\n' "$work/release-backups" > "$CONF/release.env"
 export ERIS_API_WAIT_ATTEMPTS=1
 original_images="$(cat "$CONF/images.env")"
 
@@ -203,6 +216,11 @@ check "the missing image is the reason" -- grep -q "must name ERIS_DB_IMAGE exac
 check "nothing was pulled for refused releases" -- test ! -s "$STATE/pulled"
 
 release_file "$work/good.env" 1111
+cp "$CONF/release.env" "$work/rehearsal-release.env"
+sed -i 's/ERIS_VERIFY_PROFILE=rehearsal/ERIS_VERIFY_PROFILE=production/' "$CONF/release.env"
+expect_fail "production cannot release without HTTPS web and file origins" bash "$SCRIPT" release "$work/good.env"
+check "the release refusal names the required origins" -- grep -q 'requires ERIS_PUBLIC_URL and ERIS_FILES_URL' "$work/out"
+cp "$work/rehearsal-release.env" "$CONF/release.env"
 mkdir "$CONF/.release.lock"
 expect_fail "a second release cannot run at the same time" bash "$SCRIPT" release "$work/good.env"
 check "the lock is the reason" -- grep -q "Another release is in progress" "$work/out"
@@ -229,7 +247,7 @@ check "the restored volumes are recorded for systemd" -- grep -q "^ERIS_DB_VOLUM
 check "the rollback is logged" -- grep -q "release FAILED harbor.test/eris/api@sha256:dead.*rolled back" "$CONF/releases.log"
 
 printf '#!/usr/bin/env bash\nexit "${STUB_VERIFY_EXIT:-0}"\n' > "$CONF/verify-rehearsal.sh"
-printf 'ERIS_BACKUP_ROOT=%s\nERIS_PUBLIC_URL=https://eris.example.test\n' "$work/release-backups" > "$CONF/release.env"
+printf 'ERIS_BACKUP_ROOT=%s\nERIS_PUBLIC_URL=https://eris.example.test\nERIS_FILES_URL=https://files.example.test\n' "$work/release-backups" > "$CONF/release.env"
 release_file "$work/next.env" 6666
 STUB_VERIFY_EXIT=1 expect_fail "a release that fails production verification is rolled back" bash "$SCRIPT" release "$work/next.env"
 check "verification failure restores the previous images" -- cmp -s "$work/good.env" "$CONF/images.env"

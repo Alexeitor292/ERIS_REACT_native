@@ -1,7 +1,7 @@
 name: iOS
 
 # The native Swift ERIS iOS app (ios/). ERISKit's tests run on Linux (cheap);
-# only when they pass does the macOS job build every app configuration with
+# only when they pass do the macOS jobs build every app configuration with
 # Xcode. The committed project must match ios/project.yml, so the Caltrans Mac
 # needs only Xcode to open it. CI never writes source back to the repository.
 on:
@@ -57,13 +57,24 @@ jobs:
         run: git diff --exit-code -- ../ios/ERIS/Resources/MemoEditor.html || (echo "Run 'npm run build:memo-ios' in web/ and commit ios/ERIS/Resources/MemoEditor.html." && exit 1)
 
   app:
-    name: App build (Xcode)
+    name: App build (Xcode, ${{ matrix.configuration }})
     needs: eriskit
-    runs-on: macos-15
+    runs-on: macos-26
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Staging, Release]
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
-      - name: Xcode version
-        run: xcodebuild -version
+      - name: Verify distribution-supported Xcode and SDK
+        run: |
+          xcodebuild -version
+          xcode_version=$(xcodebuild -version | awk '/^Xcode / {print $2}')
+          ios_sdk=$(xcrun --sdk iphoneos --show-sdk-version)
+          python3 -c 'import sys; assert int(sys.argv[1].split(".")[0]) >= 26; assert int(sys.argv[2].split(".")[0]) >= 26' "$xcode_version" "$ios_sdk"
       - name: ERISKit tests (macOS)
         working-directory: ios/ERISKit
         run: swift test
@@ -75,28 +86,33 @@ jobs:
         run: >-
           git diff --exit-code -- ios/ERIS.xcodeproj ||
           (echo 'Regenerate with xcodegen generate --spec ios/project.yml and commit ios/ERIS.xcodeproj.' && exit 1)
-      - name: Build Debug, Staging and Release for the iOS simulator
+      - name: Build ${{ matrix.configuration }} for the iOS simulator
+        env:
+          CONFIGURATION: ${{ matrix.configuration }}
         run: |
           set -o pipefail
-          for configuration in Debug Staging Release; do
-            xcodebuild -project ios/ERIS.xcodeproj -scheme ERIS -configuration "$configuration" \
-              -destination 'generic/platform=iOS Simulator' \
-              -derivedDataPath "$RUNNER_TEMP/ERIS-derived-data" \
-              -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO build 2>&1 \
-              | tee "build-$configuration.log" \
-              | grep -E "error:|warning: .*ERIS|BUILD (SUCCEEDED|FAILED)" || true
-            grep -q "BUILD SUCCEEDED" "build-$configuration.log"
-          done
+          set +e
+          xcodebuild -project ios/ERIS.xcodeproj -scheme ERIS -configuration "$CONFIGURATION" \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/ERIS-derived-data" \
+            -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO build 2>&1 \
+            | tee "build-$CONFIGURATION.log" \
+            | grep -E "error:|warning: .*ERIS|BUILD (SUCCEEDED|FAILED)"
+          build_status=${PIPESTATUS[0]}
+          set -e
+          if [ "$build_status" -ne 0 ]; then exit "$build_status"; fi
+          grep -q "BUILD SUCCEEDED" "build-$CONFIGURATION.log"
+          plutil -lint "$RUNNER_TEMP/ERIS-derived-data/Build/Products/$CONFIGURATION-iphonesimulator/ERIS.app/PrivacyInfo.xcprivacy"
       - name: Upload the build log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: xcodebuild-log
+          name: xcodebuild-log-${{ matrix.configuration }}
           path: build-*.log
           if-no-files-found: ignore
       - name: Upload the generated project for review
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: generated-xcode-project
+          name: generated-xcode-project-${{ matrix.configuration }}
           path: ios/ERIS.xcodeproj

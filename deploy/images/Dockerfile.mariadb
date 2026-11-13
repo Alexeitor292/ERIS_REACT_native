@@ -5,7 +5,22 @@ FROM golang:1.27.4-alpine@sha256:0a5f7fe796599ff487605987432e7619ae45beeb2fba4c2
 ENV CGO_ENABLED=0 GOTOOLCHAIN=local
 RUN go install github.com/tianon/gosu@1.20
 
-FROM mariadb:11@sha256:d36f18d65a0459510b8b0f643b226a6d299e3206486e2b64ff20754a6d291707
-RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+FROM mariadb:11@sha256:d36f18d65a0459510b8b0f643b226a6d299e3206486e2b64ff20754a6d291707 AS upstream
+
+# Use supported Alpine packages for the same MariaDB 11.8 server series. Keep
+# package metadata and the upstream initialization/health scripts intact.
+FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+RUN apk upgrade --no-cache \
+    && apk add --no-cache mariadb=11.8.9-r0 mariadb-client=11.8.9-r0 \
+       mariadb-server-utils=11.8.9-r0 bash tzdata pwgen zstd xz openssl \
+    && mkdir -p /run/mysqld /docker-entrypoint-initdb.d \
+    && chown mysql:mysql /run/mysqld /var/lib/mysql \
+    && sed -i '/^[[:space:]]*skip-networking/s/^/#/' /etc/my.cnf.d/mariadb-server.cnf
 COPY --from=gosu /go/bin/gosu /usr/local/bin/gosu
-RUN gosu nobody id && gosu --version
+COPY --from=upstream /usr/local/bin/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY --from=upstream /usr/local/bin/healthcheck.sh /usr/local/bin/healthcheck.sh
+ENV MARIADB_VERSION=11.8.9
+VOLUME /var/lib/mysql
+EXPOSE 3306
+ENTRYPOINT ["docker-entrypoint.sh"]
+CMD ["mariadbd", "--user=mysql", "--datadir=/var/lib/mysql", "--socket=/run/mysqld/mysqld.sock", "--bind-address=0.0.0.0"]

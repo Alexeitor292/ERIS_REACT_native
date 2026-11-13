@@ -1,0 +1,67 @@
+name: Deployment images
+on:
+  pull_request:
+    paths: ["backend/**", "web/**", "deploy/**", ".github/workflows/deployment-images.yml"]
+  push:
+    branches: [main]
+    paths: ["backend/**", "web/**", "deploy/**", ".github/workflows/deployment-images.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: deployment-images-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  images:
+    name: Image ${{ matrix.name }} (build, SBOM, all-severity scan)
+    runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: api, dockerfile: backend/Dockerfile, context: backend}
+          - {name: worker, dockerfile: backend/Dockerfile.worker, context: backend}
+          - {name: web, dockerfile: web/Dockerfile, context: web}
+          - {name: mariadb, dockerfile: deploy/images/Dockerfile.mariadb, context: .}
+          - {name: seaweedfs, dockerfile: deploy/images/Dockerfile.seaweedfs, context: .}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build candidate from this exact source, refreshing OS packages
+        run: >-
+          docker build --pull --no-cache --label org.opencontainers.image.revision=${{ github.sha }}
+          -f ${{ matrix.dockerfile }} -t localhost/eris/${{ matrix.name }}:candidate ${{ matrix.context }}
+      - name: Record exact identity and export test candidate
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          docker image inspect --format '{{.Id}}' localhost/eris/${{ matrix.name }}:candidate > "$RUNNER_TEMP/evidence/image-id.txt"
+          docker save localhost/eris/${{ matrix.name }}:candidate | gzip -1 > "$RUNNER_TEMP/evidence/${{ matrix.name }}.tar.gz"
+      - name: Generate SBOM and fail on any known vulnerability or embedded secret
+        env:
+          TRIVY: aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$RUNNER_TEMP/evidence:/evidence" -v "$RUNNER_TEMP/trivy:/cache" "$TRIVY" --cache-dir /cache image --format cyclonedx --output /evidence/sbom.cdx.json localhost/eris/${{ matrix.name }}:candidate
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$RUNNER_TEMP/evidence:/evidence" -v "$RUNNER_TEMP/trivy:/cache" "$TRIVY" --cache-dir /cache image --scanners vuln,secret --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL --exit-code 1 --format json --output /evidence/scan.json localhost/eris/${{ matrix.name }}:candidate
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: candidate-${{ matrix.name }}
+          path: ${{ runner.temp }}/evidence/
+          if-no-files-found: ignore
+          retention-days: 14
+  podman:
+    name: Release regressions and real rootless secrets
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify supported Podman and rootless mapping
+        run: |
+          podman --version
+          test "$(podman info --format '{{.Host.Security.Rootless}}')" = true
+      - name: Deployment and publication regression tests
+        run: |
+          bash deploy/podman/tests/test-eris-pod.sh
+          bash deploy/podman/tests/test-verify-rehearsal.sh
+          bash deploy/ci/tests/test-release-gate.sh
+          bash deploy/ci/tests/test-publish-release.sh
+      - name: Real rootless private secret permissions and rotation
+        run: bash deploy/podman/tests/test-native-secrets.sh

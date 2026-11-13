@@ -15,7 +15,7 @@ options:
 #   with the Campos Labs Apple team and sent to testers through TestFlight
 #   ("ERIS Staging" scheme → Archive → TestFlight).
 # - Release: the Caltrans production build, gov.ca.dot.eris, signed by Caltrans
-#   (enterprise, manual signing) and delivered through Intune Company Portal;
+#   using the approved distribution profile, delivered through Intune;
 #   Entra only, licensed with the 200.x license the production ERIS serves.
 #   Never archived with the Campos Labs team, so Caltrans's bundle ID is never
 #   registered under another account.

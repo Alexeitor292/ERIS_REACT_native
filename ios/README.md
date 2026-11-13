@@ -13,6 +13,21 @@ this Swift project exclusively; the retired React Native/Expo project has been r
 
 ## On the Caltrans Mac (Xcode only, no other tools)
 
+**Agency deployment inputs are not assigned yet.** The current Release URL is
+`https://eris.example.gov/api`, a placeholder, and Debug/Staging still use the
+personal Campos Labs signing team and host. A passing unsigned simulator build
+does not make these configurations ready to distribute. Before an agency archive,
+assign its HTTPS API, bundle ID, Apple team, signing/profile and distribution
+method, MSAL registration/redirect, APNs topic/environment and valid ArcGIS license.
+Do not distribute an agency production build with the placeholder or personal team.
+
+Use **Xcode 26 or newer with an iOS 26 or newer SDK** for App Store Connect
+delivery (including custom apps and TestFlight). Apple has required this since
+April 28, 2026; older Xcode 16 simulator success is not submission readiness.
+CI pins Xcode 26.6 on the macOS 26 runner and compiles Debug, Staging and Release
+in separate jobs, checking generated-project freshness and the bundled privacy
+manifest. [Apple SDK minimum](https://developer.apple.com/news/upcoming-requirements/?id=04282026a).
+
 1. `git pull --ff-only` the accepted `main` branch and open `ios/ERIS.xcodeproj`.
 2. Signing is set in `project.yml`, not in Xcode's signing pane (the project is
    regenerated from it): Debug and Staging use the Campos Labs team
@@ -28,7 +43,7 @@ sign-in, maps licensing and how it reaches phones:
 | Scheme → Archive | Bundle ID | Server | Sign-in | Maps licensing | Delivered by |
 | --- | --- | --- | --- | --- | --- |
 | **ERIS Staging** (Staging; "ERIS Staging" on the iPhone) | `org.camposlabs.eris` | `eris.camposlabs.org` | ERIS email and password when the server allows it; Entra when it has the mobile client | ArcGIS developer licensing | TestFlight, Campos Labs Apple team |
-| **ERIS** (Release) | `gov.ca.dot.eris` | Caltrans production | Entra only | the ArcGIS Maps SDK 200.x license from the production ERIS (`ARCGIS_LICENSE_KEY`) | Intune Company Portal, Caltrans enterprise signing (manual) |
+| **ERIS** (Release) | `gov.ca.dot.eris` | Caltrans production | Entra only | the ArcGIS Maps SDK 200.x license from the production ERIS (`ARCGIS_LICENSE_KEY`) | Intune through the approved agency custom-app or Enterprise distribution path |
 
 The two builds have different bundle IDs, so an iPhone can hold both. The Account
 screen shows the build and the maps' licensing; the sign-in screen of a staging build
@@ -57,9 +72,14 @@ Until Caltrans IT hosts ERIS and registers the Entra apps, staging runs on
 
 ### Production
 
-Archive the **ERIS** scheme with the Caltrans enterprise certificate and profile, export
-for Enterprise (in-house) distribution, and upload the `.ipa` to Intune as an iOS
-line-of-business app (see the spec for renewal dates).
+Select the approved Apple distribution path first using the
+[licensing report](../docs/caltrans/licensing-bill-of-materials.md#apple-signing-and-company-portal).
+For an approved Enterprise membership, archive **ERIS** with its certificate and
+in-house profile, export the `.ipa` and upload it to Intune as a line-of-business
+app. For a standard developer membership/custom app, archive with the agency's
+App Store distribution assets, submit the private custom app through App Store
+Connect, then assign it through the Apple Business/Intune integration. Both need
+real agency build settings and device acceptance; neither uses Campos Labs signing.
 
 ## Port status
 
@@ -83,14 +103,15 @@ line-of-business app (see the spec for renewal dates).
 | Staying current without refreshing | Ported. One round (`OfflineSync.catchUp`) sends what is waiting, reloads My Work (kept on the iPhone for offline) and keeps the work assigned to the person ready (`AssignedWork`: for each assessment assigned to them in Draft or Revision requested, the assessment, its incident and the incident's photos, every technical form with its site history and photos, and the choice lists; photos of work no longer assigned are dropped). It runs every minute while the app is open, when it comes to the front, when the network returns, when a notice arrives (pushes carry `content-available`, so iOS wakes the app in the background; Apple delivers the latest one once an offline iPhone is back) and in iOS background refresh. Screens follow each round. Kept files are protected until the iPhone is first unlocked after a restart, so work can arrive while it is locked. The ArcGIS offline map comes with the maps phase |
 | My Work: one queue, as on the web: coordinator triage (decision, Incident Group, corrections, duplicates), maintenance workflow reviews and decisions (including the reporter answering a request), assessments to route, assign, complete and review, form shares to approve; administrators choose geotechnical, maintenance or both | Ported; needs device test |
 | Road inventory (`mobile/src/services/roadInventoryOffline.ts`) | Ported as a tool, not a screen: the published package (road segments and Caltrans postmile reference points) is checked against its SHA-256 and kept on the iPhone, checked daily and downloaded on Wi-Fi (on any network when there is none yet), with its status and Update Now under Account. Report's Use my location and the form header's Use My Location find the post mile from it without a connection, then online; Report can also find a post mile's coordinates and shows the road there (lanes, surface, speed). The Expo app's road inventory browsing screen is not ported. The server serves the package to every account but a read-only viewer, and to a viewer who reports for a district maintenance workflow |
-| Maps and offline terrain (ArcGIS Maps SDK for Swift 200.8) | In progress. The API key and license come from ERIS (`/arcgis/runtime-config`), kept for the server's offline window. Licensing follows the build's deployment (`ERIS_DEPLOYMENT`): Debug and Staging builds use developer licensing; the Release (production) build applies the 200.x license the production ERIS serves and, if none comes or the SDK refuses it (a 100.x Runtime license does not license 200.x), says so on the maps and the Account screen. Site areas: the form header's map draws, reshapes and removes the site's areas around its location, stored in `geometry_json` exactly as the web does (`SiteAreas`, ported with its tests). A published offline basemap (`mmpk_url`) is downloaded (on Wi-Fi unless there is none yet) and used when the online one cannot load; with neither, areas are drawn on a plain grid. The Site Photo Map shows where and which way each photo was taken. It and each photo open from what the iPhone kept (assigned forms' photo maps come with the work), and a photo's location or direction corrected without a connection is kept, shown as made, and sent with the rest of the waiting work, under its own id so a resend is not recorded twice; a correction ERIS refuses stays with the reason until discarded. Offline 3D terrain: the site's ERIS terrain package (USGS 3DEP elevation, hillshade, aerial imagery when packaged, roads) comes to the iPhone with the assigned work, checked (SHA-256, each entry's CRC) and unpacked (`AssignedTerrain`, with the terrain models ported with their tests); a form not assigned can ask for it from Measurements. Measurements opens it in SceneKit, with no network: elevation at true scale, vertical exaggeration 0.5× to 3×, imagery or relief, the site pin, its areas and the roads draped on the ground. Terrain of work no longer assigned is removed, unless changes to the form wait or it was asked for by hand. Not yet: the road slice, inspection and corridor tools. Not ported: the Mission Center map (browsing) |
+| Maps and offline terrain (ArcGIS Maps SDK for Swift 200.8) | In progress. The API key and license come from ERIS (`/arcgis/runtime-config`), kept for the server's offline window. Licensing follows the build's deployment (`ERIS_DEPLOYMENT`): Debug and Staging builds use developer licensing; the Release (production) build applies the 200.x license the production ERIS serves and, if none comes or the SDK refuses it (100.x/200.x Runtime license strings are compatible; 300.x strings are separate), says so on the maps and the Account screen. Site areas: the form header's map draws, reshapes and removes the site's areas around its location, stored in `geometry_json` exactly as the web does (`SiteAreas`, ported with its tests). A published offline basemap (`mmpk_url`) is downloaded (on Wi-Fi unless there is none yet) and used when the online one cannot load; with neither, areas are drawn on a plain grid. The Site Photo Map shows where and which way each photo was taken. It and each photo open from what the iPhone kept (assigned forms' photo maps come with the work), and a photo's location or direction corrected without a connection is kept, shown as made, and sent with the rest of the waiting work, under its own id so a resend is not recorded twice; a correction ERIS refuses stays with the reason until discarded. Offline 3D terrain: the site's ERIS terrain package (USGS 3DEP elevation, hillshade, aerial imagery when packaged, roads) comes to the iPhone with the assigned work, checked (SHA-256, each entry's CRC) and unpacked (`AssignedTerrain`, with the terrain models ported with their tests); a form not assigned can ask for it from Measurements. Measurements opens it in SceneKit, with no network: elevation at true scale, vertical exaggeration 0.5× to 3×, imagery or relief, the site pin, its areas and the roads draped on the ground. Terrain of work no longer assigned is removed, unless changes to the form wait or it was asked for by hand. Not yet: the road slice, inspection and corridor tools. Not ported: the Mission Center map (browsing) |
 
 ## Working on it on the Mac
 
 - `cd ios/ERISKit && swift test` runs the core tests in seconds.
-- Without XcodeGen installed, use the `ERIS.xcodeproj` CI committed; after changing
-  `project.yml`, push and let CI regenerate it (or install the XcodeGen release
-  binary into `~/bin`, which needs no admin rights).
+- Without XcodeGen installed, use the committed `ERIS.xcodeproj`. After changing
+  `project.yml` or adding resources, regenerate it with XcodeGen and commit the
+  result. CI checks freshness and uploads its generated project as a review
+  artifact when it differs; it does not push changes to the repository.
 - Port one screen at a time. Put logic and API calls in `ERISKit` with tests ported
   from the matching `*.test.ts`; keep SwiftUI views thin.
 - **Demo mode (Debug builds only).** Launch with the arguments `-ERISDemo YES` (Xcode:
@@ -109,3 +130,25 @@ line-of-business app (see the spec for renewal dates).
 - **Parity fixtures.** The committed `ERISKit/Tests/ERISKitTests/Fixtures/` files preserve the migration baseline. Maintain these fixtures alongside the native Swift tests. The Expo-based fixture generator was retired with the React Native project.
 - The server contract is [the iOS specification](../docs/development/ios.md); never put a token in a URL, and
   decode GISA forms with `preservingKeys: true`.
+
+## Privacy manifest and release review
+
+`ERIS/PrivacyInfo.xcprivacy` records the required reasons for the APIs the app
+and its ERISKit package currently call: UserDefaults (`CA92.1`) for app-owned
+preferences, file timestamps (`C617.1`) for its offline cache, and system boot
+time (`35F9.1`) to measure the age of a camera motion sample. Uptime itself is
+not sent off-device. These reasons follow Apple's
+[required-reason API definitions](https://developer.apple.com/documentation/bundleresources/app-privacy-configuration/nsprivacyaccessedapitypes/nsprivacyaccessedapitype)
+and [manifest guidance](https://developer.apple.com/documentation/technotes/tn3183-adding-required-reason-api-entries-to-your-privacy-manifest).
+CI checks that the manifest is in every built app configuration and parses as
+a valid plist. Update the declarations if actual API usage changes.
+
+This manifest does **not** assert that ERIS collects no data. Before a custom-app
+or App Store Connect submission, the owner and privacy reviewer must approve
+the app's privacy policy and data-collection answers using the actual deployed
+system. Review staff account/contact identifiers, incident/form text and files,
+photo/video and precise location metadata, push registration and notification
+content. Also review MSAL/Entra and ArcGIS/service traffic, SDK privacy manifests,
+retention, purpose, linkage and any tracking. Do not equate no advertising code
+with no data collection. Generate the privacy report for the signed archive in
+Xcode, reconcile SDK declarations, and record the final answers with acceptance.

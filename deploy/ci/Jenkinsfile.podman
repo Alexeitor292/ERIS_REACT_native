@@ -9,8 +9,8 @@ pipeline {
     string(name: 'HARBOR_HOST', defaultValue: 'harbor.example.gov', description: 'Approved Harbor hostname')
     string(name: 'HARBOR_PROJECT', defaultValue: 'eris', description: 'Harbor project')
     string(name: 'RELEASE_TAG', defaultValue: '', description: 'Immutable release tag; blank uses the Jenkins build number')
-    string(name: 'MARIADB_SOURCE', defaultValue: 'harbor.example.gov/eris/mariadb:11', description: 'IT-approved MariaDB mirror in Harbor (scanned and signed with the release)')
-    string(name: 'SEAWEEDFS_SOURCE', defaultValue: 'harbor.example.gov/eris/seaweedfs:4.50', description: 'IT-approved SeaweedFS mirror in Harbor (scanned and signed with the release)')
+    string(name: 'MARIADB_SOURCE', defaultValue: '', description: 'Optional approved MariaDB mirror; blank builds the patched repository recipe')
+    string(name: 'SEAWEEDFS_SOURCE', defaultValue: '', description: 'Optional approved SeaweedFS mirror; blank builds the patched repository recipe')
     string(name: 'TRIVY_IMAGE', defaultValue: 'docker.io/aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb', description: 'Scanner image; mirror into Harbor and pin by digest')
     string(name: 'COSIGN_IMAGE', defaultValue: 'ghcr.io/sigstore/cosign/cosign:v2.4.1', description: 'Signing image; mirror into Harbor and pin by digest')
     string(name: 'TRIVY_DB_REPOSITORY', defaultValue: '', description: 'Harbor mirror of the Trivy vulnerability database (blank: Trivy default)')
@@ -37,6 +37,7 @@ pipeline {
           bash deploy/podman/tests/test-eris-pod.sh
           bash deploy/podman/tests/test-verify-rehearsal.sh
           bash deploy/ci/tests/test-release-gate.sh
+          bash deploy/ci/tests/test-publish-release.sh
         '''
       }
     }
@@ -53,11 +54,17 @@ pipeline {
           sh '''
             set -eu
             labels="--label org.opencontainers.image.revision=$ERIS_SOURCE_REVISION --label org.opencontainers.image.version=$ERIS_TAG"
-            podman build $labels -t "$ERIS_REPO/api:$ERIS_TAG" backend
-            podman build $labels -f backend/Dockerfile.worker -t "$ERIS_REPO/worker:$ERIS_TAG" backend
+            podman build --pull=always --no-cache $labels -t "$ERIS_REPO/api:$ERIS_TAG" backend
+            podman build --pull=always --no-cache $labels -f backend/Dockerfile.worker -t "$ERIS_REPO/worker:$ERIS_TAG" backend
             bash deploy/podman/build-web.sh "$ERIS_REPO/web:$ERIS_TAG" \
               "$ENTRA_ENABLED" "$LOCAL_LOGIN_ENABLED"
             podman run --rm --entrypoint python "$ERIS_REPO/api:$ERIS_TAG" -m compileall -q app
+            if [ -z "$MARIADB_SOURCE" ]; then
+              podman build --pull=always --no-cache $labels -f deploy/images/Dockerfile.mariadb -t "$ERIS_REPO/mariadb:$ERIS_TAG" .
+            fi
+            if [ -z "$SEAWEEDFS_SOURCE" ]; then
+              podman build --pull=always --no-cache $labels -f deploy/images/Dockerfile.seaweedfs -t "$ERIS_REPO/seaweedfs:$ERIS_TAG" .
+            fi
           '''
         }
       }
@@ -77,19 +84,7 @@ pipeline {
         '''
       }
     }
-    stage('SBOM and vulnerability gate') {
-      steps {
-        // Before anything is pushed: a failure here publishes nothing.
-        sh '''
-          set -eu
-          rm -rf "$RELEASE_DIR" && mkdir -p "$RELEASE_DIR/sbom"
-          for image in api worker web; do
-            bash deploy/ci/release-gate.sh scan "$ERIS_REPO/$image:$ERIS_TAG" "$image" "$RELEASE_DIR/sbom"
-          done
-        '''
-      }
-    }
-    stage('Publish, sign and attest') {
+    stage('Scan all images, publish, sign and attest') {
       steps {
         withCredentials([
           usernamePassword(credentialsId: 'harbor-eris-robot', usernameVariable: 'HARBOR_USER', passwordVariable: 'HARBOR_PASS'),
@@ -98,42 +93,22 @@ pipeline {
         ]) {
           sh '''
             set -eu
-            export REGISTRY_AUTH_FILE="$(mktemp -d)/auth.json"
-            trap 'podman logout --authfile "$REGISTRY_AUTH_FILE" "$HARBOR_HOST" >/dev/null 2>&1 || true; rm -f "$REGISTRY_AUTH_FILE"' EXIT
+            auth_dir="$(mktemp -d)"
+            export REGISTRY_AUTH_FILE="$auth_dir/auth.json"
+            trap 'podman logout --authfile "$REGISTRY_AUTH_FILE" "$HARBOR_HOST" >/dev/null 2>&1 || true; rm -rf -- "$auth_dir"' EXIT
             printf '%s' "$HARBOR_PASS" | podman login --authfile "$REGISTRY_AUTH_FILE" "$HARBOR_HOST" \
               --username "$HARBOR_USER" --password-stdin
-
-            # The IT-approved third-party mirrors go through the same gate.
-            for pair in "mariadb=$MARIADB_SOURCE" "seaweedfs=$SEAWEEDFS_SOURCE"; do
-              name="${pair%%=*}" source="${pair#*=}"
-              podman pull --authfile "$REGISTRY_AUTH_FILE" "$source"
-              bash deploy/ci/release-gate.sh scan "$source" "$name" "$RELEASE_DIR/sbom"
-              echo "${source%:*}@$(podman image inspect --format '{{.Digest}}' "$source")" > "$RELEASE_DIR/$name.ref"
+            # Optional agency mirrors receive local destination tags before scanning.
+            # They are never trusted solely because they already exist in Harbor.
+            for name in mariadb seaweedfs; do
+              if [ "$name" = mariadb ]; then source="$MARIADB_SOURCE"; else source="$SEAWEEDFS_SOURCE"; fi
+              if [ -n "$source" ]; then
+                podman pull --authfile "$REGISTRY_AUTH_FILE" "$source"
+                podman tag "$source" "$ERIS_REPO/$name:$ERIS_TAG"
+              fi
             done
-
-            # Record the digest Harbor stored, so hosts pin and sign exactly these bytes.
-            for image in api worker web; do
-              podman push --authfile "$REGISTRY_AUTH_FILE" --digestfile "$RELEASE_DIR/$image.digest" "$ERIS_REPO/$image:$ERIS_TAG"
-              echo "$ERIS_REPO/$image@$(cat "$RELEASE_DIR/$image.digest")" > "$RELEASE_DIR/$image.ref"
-            done
-
-            bash deploy/ci/release-gate.sh public-key "$RELEASE_DIR/cosign.pub"
-            for name in api worker web mariadb seaweedfs; do
-              ref="$(cat "$RELEASE_DIR/$name.ref")"
-              bash deploy/ci/release-gate.sh sign "$ref" "$RELEASE_DIR/sbom/$name.cdx.json"
-              bash deploy/ci/release-gate.sh verify "$ref" "$RELEASE_DIR/cosign.pub"
-            done
-
-            {
-              echo "# ERIS $ERIS_TAG built from $ERIS_SOURCE_REVISION; all five images scanned,"
-              echo "# signed and SBOM-attested. Copy into images.env after IT approval."
-              echo "ERIS_API_IMAGE=$(cat "$RELEASE_DIR/api.ref")"
-              echo "ERIS_WORKER_IMAGE=$(cat "$RELEASE_DIR/worker.ref")"
-              echo "ERIS_WEB_IMAGE=$(cat "$RELEASE_DIR/web.ref")"
-              echo "ERIS_DB_IMAGE=$(cat "$RELEASE_DIR/mariadb.ref")"
-              echo "ERIS_STORAGE_IMAGE=$(cat "$RELEASE_DIR/seaweedfs.ref")"
-              echo "ERIS_REQUIRE_DIGESTS=true"
-            } > "$RELEASE_DIR/release-images.env"
+            rm -rf -- "$RELEASE_DIR"
+            bash deploy/ci/publish-release.sh "$ERIS_REPO" "$ERIS_TAG" "$RELEASE_DIR"
           '''
         }
       }
