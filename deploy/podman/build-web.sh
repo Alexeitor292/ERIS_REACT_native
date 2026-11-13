@@ -23,7 +23,7 @@ if [[ -z "${VITE_ARCGIS_API_KEY:-}" ]]; then
 fi
 
 mkdir -p "$scratch/dist"
-builder_image="$(podman build -q --target prepared "$root/web")"
+builder_image="$(podman build --pull=always --no-cache -q --target prepared "$root/web")"
 podman run --rm --network none \
   -e NODE_OPTIONS=--max-old-space-size=4096 \
   -e VITE_API_BASE_URL=/api -e VITE_API_BASE=/api \
@@ -35,6 +35,6 @@ podman run --rm --network none \
   -v "$scratch/dist:/app/dist:Z" \
   "$builder_image" npm run build
 cp "$root/web/nginx.conf" "$scratch/nginx.conf"
-podman build -f "$root/web/Dockerfile.runtime" \
+podman build --pull=always --no-cache -f "$root/web/Dockerfile.runtime" \
   --label "org.opencontainers.image.revision=${ERIS_SOURCE_REVISION:-unknown}" \
   -t "$image" "$scratch"

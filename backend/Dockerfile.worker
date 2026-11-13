@@ -17,7 +17,13 @@ ARG GDAL_PACKAGE_VERSION=3.13.3-r0
 RUN apk upgrade --no-cache && apk add --no-cache "gdal=${GDAL_PACKAGE_VERSION}"
 COPY --from=wheels /wheels /wheels
 COPY requirements.txt requirements-worker.txt constraints.txt ./
-RUN pip install --no-cache-dir --upgrade pip==26.3 setuptools==84.2.1 && pip install --no-cache-dir --no-index --find-links=/wheels -r requirements-worker.txt && rm -rf /wheels
+# The runtime needs the installed libraries, not pip and its vendored installer
+# code. Preserve application dist-info metadata for complete SBOM/package scans.
+RUN pip install --no-cache-dir --upgrade pip==26.3 setuptools==84.2.1 \
+    && pip install --no-cache-dir --no-index --find-links=/wheels -r requirements-worker.txt \
+    && python -m pip check \
+    && python -m pip uninstall --yes pip \
+    && rm -rf /wheels
 COPY app ./app
 COPY alembic.ini .
 COPY migrations ./migrations

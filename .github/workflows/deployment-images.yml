@@ -30,9 +30,42 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Build candidate from this exact source, refreshing OS packages
+        run: |
+          args=()
+          if [ '${{ matrix.name }}' = web ]; then args+=(--build-arg ERIS_API_UPSTREAM=127.0.0.1:8000); fi
+          docker build --pull --no-cache --label org.opencontainers.image.revision=${{ github.event.pull_request.head.sha || github.sha }} \
+            "${args[@]}" -f ${{ matrix.dockerfile }} -t localhost/eris/${{ matrix.name }}:candidate ${{ matrix.context }}
+      - name: Exact API runtime imports and installer removal
+        if: matrix.name == 'api'
         run: >-
-          docker build --pull --no-cache --label org.opencontainers.image.revision=${{ github.event.pull_request.head.sha || github.sha }}
-          -f ${{ matrix.dockerfile }} -t localhost/eris/${{ matrix.name }}:candidate ${{ matrix.context }}
+          docker run --rm --network none -e DB_PASS=ci_placeholder -e JWT_SECRET=ci_placeholder
+          localhost/eris/api:candidate python -c "import pytest; import app.asgi; import importlib.util; assert importlib.util.find_spec('pip') is None"
+      - name: Exact worker GeoTIFF and GDAL/PROJ projection
+        if: matrix.name == 'worker'
+        run: |
+          docker run --rm -i --network none -e DB_PASS=ci_placeholder -e JWT_SECRET=ci_placeholder localhost/eris/worker:candidate python - <<'PY'
+          import importlib.util
+          import numpy as np
+          import rasterio
+          from rasterio.io import MemoryFile
+          from rasterio.transform import from_origin
+          from rasterio.warp import calculate_default_transform, reproject, Resampling
+          from app.worker.offline_scene_worker import run_worker
+          from app.services.offline_scene_builder import HillshadeReliefBuilder
+          assert importlib.util.find_spec('pip') is None
+          source = np.array([[10, 20], [30, 40]], dtype='float32')
+          transform = from_origin(-121, 38, 0.01, 0.01)
+          with MemoryFile() as mem:
+              with mem.open(driver='GTiff', height=2, width=2, count=1, dtype='float32', crs='EPSG:4326', transform=transform) as dst:
+                  dst.write(source, 1)
+              with mem.open() as src:
+                  np.testing.assert_array_equal(src.read(1), source)
+                  dst_transform, width, height = calculate_default_transform(src.crs, 'EPSG:3857', src.width, src.height, *src.bounds)
+                  target = np.zeros((height, width), dtype='float32')
+                  reproject(rasterio.band(src, 1), target, src_transform=src.transform, src_crs=src.crs, dst_transform=dst_transform, dst_crs='EPSG:3857', resampling=Resampling.nearest)
+                  assert np.isfinite(target).all() and target.min() >= source.min() and target.max() <= source.max()
+          print('GeoTIFF decode and GDAL/PROJ reproject OK:', rasterio.__gdal_version__)
+          PY
       - name: Record exact identity and export test candidate
         run: |
           mkdir -p "$RUNNER_TEMP/evidence"

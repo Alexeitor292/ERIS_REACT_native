@@ -4,7 +4,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 RUN apk upgrade --no-cache
 COPY requirements.txt constraints.txt ./
-RUN pip install --no-cache-dir --upgrade pip==26.3 setuptools==84.2.1 && pip install --no-cache-dir -r requirements.txt
+# Package installation is a build operation; the deployed service needs no
+# installer or its vendored libraries. Uninstall pip itself after resolving the
+# locked runtime dependencies, keeping their dist-info metadata for audits.
+RUN pip install --no-cache-dir --upgrade pip==26.3 setuptools==84.2.1 \
+    && pip install --no-cache-dir -r requirements.txt \
+    && python -m pip check \
+    && python -m pip uninstall --yes pip
 COPY app ./app
 COPY alembic.ini .
 COPY migrations ./migrations

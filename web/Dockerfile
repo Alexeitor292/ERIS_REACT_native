@@ -44,9 +44,11 @@ FROM nginx:1.30.6-alpine@sha256:901e593c95dc85f5a729f5765516321366ef4ac401821431
 RUN apk upgrade --no-cache
 
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-# Compose containers have separate network namespaces. The Podman builder uses
-# Dockerfile.runtime and retains loopback for its shared pod instead.
-RUN sed -i 's|http://127.0.0.1:8000/|http://backend:8000/|' /etc/nginx/conf.d/default.conf
+# Compose uses a separate API network namespace. Shared-pod builds explicitly
+# select loopback; restrict this internal build input to the supported modes.
+ARG ERIS_API_UPSTREAM=backend:8000
+RUN case "$ERIS_API_UPSTREAM" in backend:8000|127.0.0.1:8000) ;; *) exit 2 ;; esac \
+    && sed -i "s|http://127.0.0.1:8000/|http://$ERIS_API_UPSTREAM/|" /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 
 EXPOSE 80

@@ -53,6 +53,7 @@ pipeline {
         withCredentials([string(credentialsId: 'eris-arcgis-web-key', variable: 'VITE_ARCGIS_API_KEY')]) {
           sh '''
             set -eu
+            test -n "$VITE_ARCGIS_API_KEY" || { echo 'Set the agency-owned, origin-restricted web ArcGIS key'; exit 2; }
             labels="--label org.opencontainers.image.revision=$ERIS_SOURCE_REVISION --label org.opencontainers.image.version=$ERIS_TAG"
             podman build --pull=always --no-cache $labels -t "$ERIS_REPO/api:$ERIS_TAG" backend
             podman build --pull=always --no-cache $labels -f backend/Dockerfile.worker -t "$ERIS_REPO/worker:$ERIS_TAG" backend
