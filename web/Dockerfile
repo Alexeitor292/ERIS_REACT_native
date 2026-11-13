@@ -41,7 +41,16 @@ ENV VITE_GOOGLE_MAPS_EMBED_KEY=$VITE_GOOGLE_MAPS_EMBED_KEY
 RUN NODE_OPTIONS=--max-old-space-size=4096 npm run build
 
 FROM nginx:1.30.6-alpine@sha256:901e593c95dc85f5a729f5765516321366ef4ac401821431d408897e95287d0a
-RUN apk upgrade --no-cache
+# Keep configuration/static assets owned by root. Only nginx's runtime state
+# directories are writable by UID101; the listener uses an unprivileged port.
+RUN apk upgrade --no-cache \
+    && test "$(id -u nginx)" = 101 \
+    && test "$(id -g nginx)" = 101 \
+    && sed -ri '/^[[:space:]]*user[[:space:]]/d; s@^[[:space:]]*pid[[:space:]]+[^;]+;@pid /tmp/nginx.pid;@' /etc/nginx/nginx.conf \
+    && grep -q '^pid /tmp/nginx.pid;' /etc/nginx/nginx.conf \
+    && mkdir -p /var/cache/nginx /var/log/nginx \
+    && chown -R 101:101 /var/cache/nginx \
+    && chown 101:101 /var/log/nginx
 
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 # Compose uses a separate API network namespace. Shared-pod builds explicitly
@@ -51,4 +60,5 @@ RUN case "$ERIS_API_UPSTREAM" in backend:8000|127.0.0.1:8000) ;; *) exit 2 ;; es
     && sed -i "s|http://127.0.0.1:8000/|http://$ERIS_API_UPSTREAM/|" /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 
-EXPOSE 80
+USER 101:101
+EXPOSE 8080

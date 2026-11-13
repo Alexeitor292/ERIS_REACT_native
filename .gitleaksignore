@@ -2,6 +2,13 @@
 # 91 public content/revision hashes and 18 public GPG/PGP signing-key fingerprints.
 # Each entry is bound to an exact commit/path/rule/line; no application code or
 # future report revision is exempt. Do not add actual credential findings here.
+
+# Reviewed synthetic S3 credentials in the isolated rootless CI fixture.
+# These exact historical findings are dummy values, never external credentials;
+# the current fixture generates a fresh random secret per run instead.
+1beff2548dfa35995e31fdd8d3f2f4014544da99:deploy/podman/tests/test-rootless-rehearsal.sh:generic-api-key:60
+1beff2548dfa35995e31fdd8d3f2f4014544da99:deploy/podman/tests/test-rootless-rehearsal.sh:generic-api-key:76
+
 323b2b4cff735c0dfba5c9ef3a7ed52477f78397:docs/security/evidence/2026-11-13/api-final-image.json:generic-api-key:193
 323b2b4cff735c0dfba5c9ef3a7ed52477f78397:docs/security/evidence/2026-11-13/api-final-image.json:generic-api-key:63
 323b2b4cff735c0dfba5c9ef3a7ed52477f78397:docs/security/evidence/2026-11-13/api-image-before-os-update.json:generic-api-key:186

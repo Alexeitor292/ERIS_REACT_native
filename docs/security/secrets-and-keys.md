@@ -27,7 +27,7 @@ flowchart TB
         db[("eris-mariadb")]
         s3[("eris-seaweedfs")]
     end
-    subgraph apple["Apple Developer Enterprise account"]
+    subgraph apple["Agency Apple developer team<br/>approved distribution path"]
         apnskey["APNs .p8 key"]
         dist["Distribution certificate<br/>+ provisioning profile"]
     end
@@ -39,10 +39,17 @@ flowchart TB
     envs --> api
     envs --> db
     envs --> s3
-    secretsdir --> api
+    secretsdir --> native["Podman protected secret store<br/>UID/GID 10001, mode 0400"] --> api
     apnskey -. downloaded once .-> secretsdir
     secretsdir -. public half .-> cert
 ```
+
+Private files are imported into Podman native secrets on pod creation, owned by
+UID/GID 10001 and mode 0400 in the API. The worker receives none. Keep host
+originals mode 600; rotation takes effect only after container recreation. The
+Podman secret store is another protected copy to account for during host
+decommission. Backups include the original files needed to recreate it.
+See [secret mapping](../../deploy/podman/README.md).
 
 ## Inventory
 
@@ -53,7 +60,7 @@ flowchart TB
 | `AWS_*` = `S3_ACCESS_KEY` / `S3_SECRET_KEY` | `storage.env`, `app.env` | SeaweedFS, API, worker | IT host admin | No | Yearly / on staff change |
 | `JWT_SECRET` (CSRF and Entra state HMAC key) | `app.env` | API | IT host admin | No | Yearly; signs everyone out |
 | Entra client certificate + key | `secrets/entra-client.crt`, `.key`; certificate also in the Entra app registration | API → Entra | IT identity team + host admin | Yes (365 days if self-signed) | Before expiry; `cert-check` warns at 30 days |
-| APNs auth key (`.p8`) + Key ID + Team ID | `secrets/apns-*.p8`, `app.env` | API → Apple | ERIS app owner in the Apple Enterprise account | No | If exposed, or when the owner leaves |
+| APNs auth key (`.p8`) + Key ID + Team ID | `secrets/apns-*.p8`, `app.env` | API → Apple | ERIS app owner in the approved agency Apple developer team | No | If exposed, or when the owner leaves |
 | SMTP relay credentials | `app.env` (`SMTP_USER`, `SMTP_PASSWORD`) | API | Caltrans email team | Per relay policy | Per relay policy |
 | ArcGIS keys (`ARCGIS_API_KEY`, `VITE_ARCGIS_API_KEY`) | `app.env`, web build variable | Phone runtime, web 3D view | GIS team | Per ArcGIS account | Yearly; restrict the browser key by origin |
 | Bootstrap admin object ID | `bootstrap.env` | First start only | IT | n/a | **Delete the file** after handover |
@@ -61,7 +68,7 @@ flowchart TB
 | Harbor robot (push) | Jenkins credential | Image push | IT DevOps | Harbor robot expiry | Per Harbor policy |
 | Harbor robot (pull) | Service account's Podman auth file | Host pulls | IT DevOps | Harbor robot expiry | Per Harbor policy |
 | Jenkins deploy SSH key | Jenkins; public half in `authorized_keys` | Release trigger | IT DevOps | No | Yearly / on staff change |
-| Apple distribution certificate + profile | Apple Enterprise account; Mac signing keychain | iPhone app builds | Apple program agent / admin | Yes (cert ~3 years, profile 1 year) | Before expiry: an expired profile stops the app launching |
+| Apple distribution certificate + profile | Approved agency Apple developer team; Mac signing keychain | iPhone app builds | Apple program agent / admin | Yes (cert ~3 years, profile 1 year) | Before expiry: an expired profile stops the app launching |
 | Backups | Approved backup target, encrypted | Restore | IT backup team | Retention policy | n/a: they **contain** the secrets above |
 
 Development values (`deploy/compose/.env`, `backend/.env`) are throwaway and
@@ -130,7 +137,7 @@ delete the old certificate from the app registration. Put a calendar reminder
 
 ### APNs key
 
-1. In the Apple Developer Enterprise account: Certificates, Identifiers &
+1. In the approved agency Apple developer team: Certificates, Identifiers &
    Profiles → Keys → create a key with Apple Push Notifications enabled.
    Download the `.p8` (only possible once).
 2. Copy it to `deploy/podman/secrets/` (mode 600); set `APNS_KEY_FILE` and

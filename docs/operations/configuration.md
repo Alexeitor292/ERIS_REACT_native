@@ -138,7 +138,7 @@ server-side values; never reuse them as the web's `VITE_ARCGIS_API_KEY`.
 | --- | --- | --- |
 | `ARCGIS_RUNTIME_ENABLED` | `false` | Turns the runtime configuration on. The Esri offline-scene builder also requires it. |
 | `ARCGIS_API_KEY` | unset | ArcGIS API key for the native runtime. |
-| `ARCGIS_LICENSE_KEY` / `ARCGIS_LICENSE_EXPIRES_AT` | unset | Runtime license string and its expiry. Production: the ArcGIS Maps SDK 200.x license string (a 100.x Runtime license does not license the iOS app's SDK). Staging: leave unset. |
+| `ARCGIS_LICENSE_KEY` / `ARCGIS_LICENSE_EXPIRES_AT` | unset | Runtime license string and its expiry. Production: a valid 100.x/200.x-compatible Runtime string for Swift SDK 200.x; 300.x strings are separate. Staging: leave unset. See [Esri's compatibility rule](https://developers.arcgis.com/swift/license-and-deployment/use-a-license-in-your-app/). |
 | `ARCGIS_MMPK_URL` | unset | URL of an offline mobile map package, if one is published. |
 | `ARCGIS_CONFIG_OFFLINE_TTL_HOURS` | `168` | How long the phone may use a cached configuration while offline. |
 

@@ -9,12 +9,11 @@ page explains the chain and how to work with it.
 
 ```mermaid
 flowchart LR
-    src["Reviewed source<br/>pull request + CI"] --> build["Jenkins builds<br/>api, worker, web"]
+    src["Reviewed source<br/>pull request + CI"] --> build["Jenkins builds<br/>all five images"]
     build --> tests["Security tests<br/>inside the built API image"]
     tests --> scan["Trivy<br/>SBOM (CycloneDX)<br/>+ vulnerability and secret gate"]
-    mirrors["IT-approved mirrors<br/>MariaDB, SeaweedFS"] --> scan2["Same gate"]
+    mirrors["Optional approved mirrors<br/>MariaDB, SeaweedFS"] --> scan
     scan --> push["Push to Harbor<br/>record the digest"]
-    scan2 --> sign
     push --> sign["cosign sign the digest<br/>+ attest the SBOM"]
     sign --> verify["cosign verify<br/>(same job)"]
     verify --> env["release-images.env<br/>five digests"]
@@ -27,13 +26,17 @@ flowchart LR
 | Validate | Stage *Validate* | A shell script has a syntax error, or the deployment and release-gate script tests (stub Podman) fail |
 | Build | Stage *Build* | An image fails to build or the API code fails to compile |
 | Security tests | Stage *Backend security checks* | Any session, Entra, route-guard, handover or push test fails inside the image that will ship |
-| SBOM and gate | Stage *SBOM and vulnerability gate*, `deploy/ci/release-gate.sh scan` | A HIGH or CRITICAL vulnerability **including findings without a published fix**, or an embedded secret, not listed in `.trivyignore` |
-| Publish, sign, attest | Stage *Publish, sign and attest* | Push, signing or the verification of the signature fails |
+| SBOM and gate | Stage *Scan all images, publish, sign and attest*, `deploy/ci/release-gate.sh scan` | Any known vulnerability at **all severities, including findings without a published fix**, or an embedded secret, not listed in `.trivyignore` |
+| Publish, sign, attest | Same stage, after all five scans | Push, signing or the verification of the signature fails |
 | Staging deploy | `deploy-hook.sh` â†’ `eris-pod.sh release` | Signature policy rejects a pull; migration, health or verification fails (automatic rollback) |
 | Production deploy | Same, after a named approver in Jenkins | Same |
 
 Nothing is pushed to Harbor before the gate passes, so a failed scan publishes
 nothing.
+
+The separate [GitHub candidate workflow](../handover/image-package.md) builds,
+scans and rehearses the five-image package without accessing a live host or
+publishing a Harbor release. Agency credentials and acceptance are still needed.
 
 ## What gets produced per release
 
@@ -94,7 +97,7 @@ possible, an exception may be added to [`.trivyignore`](../../.trivyignore):
    CVE-0000-00000
    ```
 4. The change goes through a pull request like any code.
-5. At every release, remove expired entries. An expired entry is a finding.
+5. At every release, remove expired entries. Remove an expired entry before running the gate; expiry comments require release review and are not automatically interpreted by the plain ignore-file format.
 
 Unfixed vulnerabilities also fail the default gate. Any accepted exception needs
 explicit security approval and an expiry; review findings and exceptions at every release and monthly
@@ -107,8 +110,8 @@ explicit security approval and an expiry; review findings and exceptions at ever
 | Python (API, worker) | `backend/requirements.txt` | `backend/constraints.txt` pins the API/worker resolution; built-image SBOM records it | [Dependency updates](../development/conventions.md#dependency-updates) |
 | JavaScript (web) | `web/package.json` | `web/package-lock.json` | `npm ci` in CI; update with `npm install <pkg>@<version>` |
 | Swift (iPhone) | `ios/` Swift packages pinned in `project.yml` on main | `Package.resolved` | Xcode â†’ Update to latest package versions; MSAL from Microsoft only |
-| Base images | `backend/Dockerfile`, `backend/Dockerfile.worker`, `web/Dockerfile` | Pinned tags; production pins digests | Rebuild monthly to pick up OS patches |
-| Third-party runtime images | MariaDB, SeaweedFS | Mirrored into Harbor by IT | IT mirrors a new version; Jenkins scans and signs it |
+| Base images | `backend/Dockerfile`, `backend/Dockerfile.worker`, `web/Dockerfile` | Pinned runtime base digests; production pins release digests | Rebuild monthly to pick up OS patches |
+| Third-party runtime images | MariaDB, SeaweedFS | Mirrored into Harbor by IT | Repository recipes build patched candidates by default; approved mirror overrides receive the same gate |
 | Pipeline tools | Trivy, cosign | Pinned in `release-gate.sh` | Mirror into Harbor, update `TRIVY_IMAGE` / `COSIGN_IMAGE` |
 
 ## Keys

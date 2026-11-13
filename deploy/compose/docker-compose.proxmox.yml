@@ -1,7 +1,7 @@
 services:
   adminer:
     profiles:
-      - devtools
+      - db-tools
 
   backend:
     build:
@@ -40,7 +40,7 @@ services:
       JWT_ALG: ${JWT_ALG:-HS256}
       JWT_EXPIRES_MINUTES: ${JWT_EXPIRES_MINUTES:-120}
     ports:
-      - "${API_BIND:-0.0.0.0}:8000:8000"
+      - "${API_BIND:-127.0.0.1}:8000:8000"
     depends_on:
       mariadb:
         condition: service_healthy
@@ -161,6 +161,9 @@ services:
         condition: service_completed_successfully
 
   web:
+    user: "101:101"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     build:
       context: ../../web
       dockerfile: Dockerfile
@@ -177,12 +180,12 @@ services:
     container_name: eris_web
     restart: unless-stopped
     ports:
-      - "${WEB_BIND:-0.0.0.0}:5173:80"
+      - "${WEB_BIND:-127.0.0.1}:5173:8080"
     depends_on:
       backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/healthz >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz >/dev/null 2>&1 || exit 1"]
       interval: 20s
       timeout: 5s
       retries: 10

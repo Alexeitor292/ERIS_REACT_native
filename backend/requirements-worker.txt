@@ -1,7 +1,8 @@
 # Offline 3D scene-package generation worker dependencies.
 # Extends the API requirements with the geospatial stack needed to decode the
-# USGS 3DEP DEM GeoTIFF into the canonical mobile height grid. rasterio ships a
-# bundled GDAL via manylinux wheels, so no system GDAL is required.
+# USGS 3DEP DEM GeoTIFF into the canonical mobile height grid. Linux manylinux
+# wheels bundle GDAL; the Alpine worker image builds rasterio from source
+# against its pinned system GDAL package and retains GDAL/PROJ runtime data.
 -r requirements.txt
 # HillshadeReliefBuilder uses `requests` to fetch the USGS 3DEP DEM/hillshade.
 # The API stack uses httpx, so requests is not pulled in transitively — pin it

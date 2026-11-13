@@ -46,7 +46,7 @@ flowchart LR
     gw["TLS gateway<br/>(Caltrans)"]
 
     subgraph pod["Podman pod 'eris' (one network namespace)"]
-        web["eris-web<br/>nginx: static SPA,<br/>/api reverse proxy<br/>:80"]
+        web["eris-web<br/>nginx: static SPA,<br/>/api reverse proxy<br/>:8080"]
         api["eris-api<br/>FastAPI (uvicorn)<br/>:8000"]
         worker["eris-worker<br/>offline-scene job worker"]
         db[("eris-mariadb<br/>MariaDB 11<br/>:3306")]

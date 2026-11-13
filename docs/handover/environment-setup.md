@@ -61,6 +61,12 @@ photo, and restart without losing the record.
 
 Files live in `deploy/podman/`. Copy examples separately on each host. All
 runtime secret files require mode 600; `secrets/` requires mode 700.
+`eris-pod.sh up` imports regular files in that directory into Podman's secret
+store and maps them only into the API at `/run/secrets/eris/<filename>`, UID/GID
+10001, mode 0400. Keep the host originals private; a mode-600 bind mount owned
+by the rootless service account cannot be read by container UID 10001. Rotate
+the source file and recreate the pod to refresh its mapped secret. See the
+[secret-mapping procedure](../../deploy/podman/README.md).
 
 | File | Values to assign | Supplier / validation |
 | --- | --- | --- |
@@ -87,7 +93,7 @@ needed values using the [complete configuration reference](../operations/configu
 | Feature | What to set | Acceptance |
 | --- | --- | --- |
 | Web maps | Public, origin-restricted `VITE_ARCGIS_API_KEY` supplied at web build time | [Map licensing](../operations/map-licensing.md); test each environment's origin |
-| Native maps | `ARCGIS_RUNTIME_ENABLED`, separate `ARCGIS_API_KEY`, valid Swift SDK 200.x `ARCGIS_LICENSE_KEY` | Test maps and offline use on a Caltrans device; 100.x licenses do not cover 200.x |
+| Native maps | `ARCGIS_RUNTIME_ENABLED`, separate `ARCGIS_API_KEY`, valid Swift SDK 200.x `ARCGIS_LICENSE_KEY` | Test maps and offline use on a Caltrans device; 100.x/200.x Runtime strings are compatible, while 300.x strings are separate ([Esri](https://developers.arcgis.com/swift/license-and-deployment/use-a-license-in-your-app/)) |
 | iOS Entra | `ENTRA_MOBILE_CLIENT_ID`, `ENTRA_API_SCOPE` matching exposed `access_as_user` scope; MSAL redirect/bundle registration | [iOS specification](../development/ios.md); actual device and Conditional Access test |
 | Push | `APNS_ENABLED=true`, `.p8` key file, key/team IDs, `APNS_TOPIC` matching bundle ID | Xcode debug uses sandbox tokens; enterprise uses production tokens |
 | Email | SMTP relay/port/from/TLS and credentials if required | Approval email delivered; scheduled outbox retry configured |

@@ -31,10 +31,11 @@ case "$*" in
   "inspect --format {{.ImageName}} eris-api") echo "${API_IMAGE:-harbor.test/eris/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}" ;;
   "inspect --format {{.ImageName}} eris-worker") echo harbor.test/eris/worker@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb ;;
   "inspect --format {{.ImageName}} eris-web") echo harbor.test/eris/web@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc ;;
-  "inspect --format {{.ImageName}} eris-mariadb") echo harbor.test/eris/mariadb@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd ;;
+  "inspect --format {{.ImageName}} eris-mariadb") echo "${DB_IMAGE:-harbor.test/eris/mariadb@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd}" ;;
   "inspect --format {{.ImageName}} eris-seaweedfs") echo harbor.test/eris/seaweedfs@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee ;;
-  "pod inspect "*) echo "{\"80/tcp\":[{\"HostIp\":\"127.0.0.1\",\"HostPort\":\"8080\"}],\"8333/tcp\":[{\"HostIp\":\"127.0.0.1\",\"HostPort\":\"9800\"}]${EXTRA_PORT:-}}" ;;
+  "pod inspect "*) echo "{\"8080/tcp\":[{\"HostIp\":\"${HOST_IP:-127.0.0.1}\",\"HostPort\":\"8080\"}],\"8333/tcp\":[{\"HostIp\":\"${HOST_IP:-127.0.0.1}\",\"HostPort\":\"9800\"}]${EXTRA_PORT:-}}" ;;
   "exec eris-api python -m app.tools.handover_status") exit "${HANDOVER_EXIT:-0}" ;;
+  *"ERIS_WEB_RUNTIME_POSTURE"*) exit "${WEB_POSTURE_EXIT:-0}" ;;
   *"ERIS_RUNTIME_POSTURE"*) echo 'ENV must be prod'; exit "${POSTURE_EXIT:-0}" ;;
   "exec eris-api python -m app.tools.entra_credential_check") echo "Entra certificate credential: OK"; exit "${CERT_EXIT:-0}" ;;
   "exec eris-api "*) exit 0 ;;
@@ -119,6 +120,10 @@ expect_fail_line() {
 expect_pass "a handed-over deployment passes"
 check "reports password sign-in disabled" -- grep -q "^PASS password sign-in is disabled" "$work/out"
 ERIS_VERIFY_PROFILE=production expect_pass "a pinned, Entra-only, handed-over deployment passes the production profile"
+sed -i 's|^ERIS_DB_IMAGE=harbor.test/eris/|ERIS_DB_IMAGE=harbor.test/unsigned/|' "$work/deploy/images.env"
+DB_IMAGE=harbor.test/unsigned/mariadb@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd ERIS_VERIFY_PROFILE=production \
+  expect_fail_line "production requires signatures for every image repository prefix" "no Podman signature policy.*harbor.test/unsigned"
+sed -i 's|^ERIS_DB_IMAGE=harbor.test/unsigned/|ERIS_DB_IMAGE=harbor.test/eris/|' "$work/deploy/images.env"
 ERIS_VERIFY_PROFILE=prod expect_fail_line "an unknown verification profile fails closed" "ERIS_VERIFY_PROFILE must be"
 ERIS_VERIFY_PROFILE=production WEB=http://eris.example.test expect_fail_line "production refuses a plain-HTTP web URL" "is not HTTPS"
 ERIS_VERIFY_PROFILE=production FILES= expect_fail_line "production requires the file hostname" "S3 hostname not given"
@@ -126,10 +131,14 @@ ERIS_VERIFY_PROFILE=production FILES=http://files.example.test expect_fail_line 
 ERIS_VERIFY_PROFILE=production ENTRA_ENABLED=false expect_fail_line "production requires Entra sign-in" "Entra sign-in is disabled"
 ERIS_VERIFY_PROFILE=production HANDOVER_EXIT=1 expect_fail_line "production requires administrator handover" "administrator handover check failed"
 ERIS_VERIFY_PROFILE=production POSTURE_EXIT=1 expect_fail_line "production checks effective settings and process security" "runtime posture failed"
+ERIS_VERIFY_PROFILE=production WEB_POSTURE_EXIT=1 expect_fail_line "production checks the effective nonroot nginx posture" "eris-web runtime posture failed"
 LOCAL_LOGIN=true expect_pass "password sign-in left on is a warning, not a failure"
 check "warns that password sign-in is still on" -- grep -q "^WARN password sign-in is enabled" "$work/out"
 EXTRA_PORT=',"3306/tcp":[{"HostIp":"0.0.0.0","HostPort":"3306"}]' expect_fail_line "a published MariaDB port fails" "port 3306/tcp"
 EXTRA_PORT=',"9999/tcp":[{"HostIp":"0.0.0.0","HostPort":"9999"}]' expect_fail_line "an unexpected published port fails" "port 9999/tcp"
+HOST_IP=10.2.3.4 expect_pass "a private interface for a remote TLS gateway passes"
+HOST_IP=0.0.0.0 expect_fail_line "a wildcard host binding fails" "not a public or wildcard address"
+HOST_IP=8.8.8.8 expect_fail_line "a public host binding fails" "not a public or wildcard address"
 API_IMAGE=harbor.test/eris/api@sha256:old expect_fail_line "a container running a stale image fails" "eris-api runs"
 LOCAL_LOGIN=true ERIS_VERIFY_PROFILE=production expect_fail_line "production refuses password sign-in" "password sign-in is enabled"
 sed -i 's|^ERIS_API_IMAGE=.*|ERIS_API_IMAGE=harbor.test/eris/api:release-7|' "$work/deploy/images.env"

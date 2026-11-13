@@ -1,6 +1,9 @@
 services:
   mariadb:
-    image: mariadb:11
+    image: localhost/eris/mariadb:local
+    build:
+      context: ../..
+      dockerfile: deploy/images/Dockerfile.mariadb
     container_name: eris_mariadb
     restart: unless-stopped
     environment:
@@ -23,6 +26,7 @@ services:
       retries: 15
 
   adminer:
+    profiles: [db-tools]
     image: adminer:latest
     container_name: eris_adminer
     restart: unless-stopped
@@ -33,7 +37,10 @@ services:
         condition: service_healthy
 
   seaweedfs:
-    image: chrislusf/seaweedfs:4.50
+    image: localhost/eris/seaweedfs:local
+    build:
+      context: ../..
+      dockerfile: deploy/images/Dockerfile.seaweedfs
     container_name: eris_seaweedfs
     restart: unless-stopped
     command: mini -dir=/data
@@ -44,7 +51,7 @@ services:
       S3_BUCKET: ${S3_BUCKET:-eris-uploads}
     ports:
       # Presigned file URLs point directly to the S3 gateway.
-      - "9800:8333"
+      - "${S3_BIND:-127.0.0.1}:9800:8333"
     volumes:
       - eris_seaweedfs_data:/data
 

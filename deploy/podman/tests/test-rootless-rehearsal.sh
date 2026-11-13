@@ -55,12 +55,15 @@ MARIADB_DATABASE=eris
 MARIADB_USER=eris_user
 MARIADB_PASSWORD=eris-ci-disposable-app
 ENV
-cat > "$deploy/storage.env" <<'ENV'
+# Disposable credentials are generated for this isolated run and never printed.
+# Hex output is safe to interpolate into these env-file heredocs.
+rehearsal_s3_secret="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+cat > "$deploy/storage.env" <<ENV
 AWS_ACCESS_KEY_ID=eris-ci-disposable-s3
-AWS_SECRET_ACCESS_KEY=eris-ci-disposable-s3-secret
+AWS_SECRET_ACCESS_KEY=$rehearsal_s3_secret
 S3_BUCKET=eris-uploads
 ENV
-cat > "$deploy/app.env" <<'ENV'
+cat > "$deploy/app.env" <<ENV
 ENV=dev
 API_DOCS_ENABLED=false
 DB_HOST=127.0.0.1
@@ -73,7 +76,7 @@ S3_PUBLIC_ENDPOINT=http://127.0.0.1:9800
 S3_BUCKET=eris-uploads
 S3_OFFLINE_SCENES_BUCKET=eris-offline-scenes
 S3_ACCESS_KEY=eris-ci-disposable-s3
-S3_SECRET_KEY=eris-ci-disposable-s3-secret
+S3_SECRET_KEY=$rehearsal_s3_secret
 STORAGE_URL_MODE=presigned
 OFFLINE_SCENE_DEV_MODE=false
 JWT_SECRET=eris-ci-disposable-32-character-signing-value
@@ -100,6 +103,17 @@ runtime_checks() {
   for container in eris-api eris-worker; do
     podman exec "$container" python -c 'import os; s=dict(line.split(":",1) for line in open("/proc/1/status") if ":" in line); assert os.geteuid()==10001; assert int(s["Uid"].split()[1])==10001; assert int(s["CapEff"].strip(),16)==0; assert s["NoNewPrivs"].strip()=="1"'
   done
+  podman exec eris-web nginx -t
+  podman exec eris-web sh -ec '
+    test "$(id -u)" = 101
+    count=0
+    for status in /proc/[0-9]*/status; do
+      grep -q "^Name:[[:space:]]*nginx$" "$status" || continue
+      awk '\''$1=="Uid:" {if ($3!=101) exit 1; uid=1} $1=="CapEff:" {if ($2 !~ /^0+$/) exit 1; caps=1} $1=="NoNewPrivs:" {if ($2!=1) exit 1; nnp=1} END {if (!uid || !caps || !nnp) exit 1}'\'' "$status"
+      count=$((count+1))
+    done
+    test "$count" -ge 2
+  '
   podman exec eris-api python -c 'import os; p="/run/secrets/eris/ci-placeholder.key"; s=os.stat(p); assert s.st_uid==10001 and s.st_gid==10001 and (s.st_mode & 0o777)==0o400; assert open(p).read()=="eris-ci-private-file"'
   podman exec eris-worker python -c 'import os; assert not os.path.exists("/run/secrets/eris/ci-placeholder.key")'
   podman exec eris-api python -c 'from app.db import engine; from sqlalchemy import text; c=engine.connect(); assert c.execute(text("SELECT COUNT(*) FROM users WHERE email=:email"),{"email":"handoff-smoke@example.invalid"}).scalar()==1; c.close()'
@@ -109,7 +123,9 @@ echo 'PASS five-image startup, same-origin health/auth config, nonroot posture a
 
 podman exec eris-api python -c 'from minio import Minio; from app.config import settings; import io; c=Minio("127.0.0.1:8333",access_key=settings.S3_ACCESS_KEY,secret_key=settings.S3_SECRET_KEY,secure=False); data=b"ERIS rootless recovery marker"; c.put_object(settings.S3_BUCKET,"ci-recovery-marker.txt",io.BytesIO(data),len(data))'
 signed_object_check() {
-  podman exec eris-api python -c 'from minio import Minio; from app.config import settings; from datetime import timedelta; c=Minio("127.0.0.1:9800",access_key=settings.S3_ACCESS_KEY,secret_key=settings.S3_SECRET_KEY,secure=False); print(c.presigned_get_object(settings.S3_BUCKET,"ci-recovery-marker.txt",expires=timedelta(minutes=5)))' > "$work/signed-url"
+  # The signing endpoint is reached by the host, not from the pod network.
+  # An explicit region keeps Minio from querying its location through port 9800.
+  podman exec eris-api python -c 'from minio import Minio; from app.config import settings; from datetime import timedelta; c=Minio("127.0.0.1:9800",access_key=settings.S3_ACCESS_KEY,secret_key=settings.S3_SECRET_KEY,secure=False,region="us-east-1"); print(c.presigned_get_object(settings.S3_BUCKET,"ci-recovery-marker.txt",expires=timedelta(minutes=5)))' > "$work/signed-url"
   python3 - "$work/signed-url" <<'PY'
 import sys, urllib.request
 address = open(sys.argv[1]).read().strip()

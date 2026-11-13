@@ -18,6 +18,7 @@ successor and IT service owner are pending assignment.
 | [Acceptance record](acceptance.md) | Assign owners/hosts and record independent setup, recovery and go-live evidence |
 | [Licensing bill of materials](../caltrans/licensing-bill-of-materials.md) | 300-device Esri Lite assessment, service usage, Apple distribution, Microsoft and developer tooling |
 | [Security review](../security/review-2026-11-13.md) | Dated scans, remediation, residual findings and production gates |
+| [Image package](image-package.md) | Five image archives, exact identities, SBOMs/scans, source and rootless recovery evidence |
 
 ## Build and receive the source package
 

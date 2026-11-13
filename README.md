@@ -44,7 +44,7 @@ flowchart LR
 ## Quick start (development)
 
 ```bash
-cd deploy/compose && cp .env.example .env && docker compose up -d   # MariaDB + SeaweedFS
+cd deploy/compose && cp .env.example .env && docker compose up -d --build   # Patched MariaDB + SeaweedFS
 # load database/dev/030_mock_accounts.sql, then from backend/:
 alembic stamp 0001_baseline && alembic upgrade head && ./run.sh     # API on :8000
 # from web/:

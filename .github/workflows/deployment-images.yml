@@ -38,12 +38,12 @@ jobs:
       - name: Exact API runtime imports and installer removal
         if: matrix.name == 'api'
         run: >-
-          docker run --rm --network none -e DB_PASS=ci_placeholder -e JWT_SECRET=ci_placeholder
+          docker run --rm --network none -e DB_PASS=ci_placeholder -e JWT_SECRET=ci_placeholder -e S3_ACCESS_KEY=ci_s3_access -e S3_SECRET_KEY=ci_s3_secret
           localhost/eris/api:candidate python -c "import pytest; import app.asgi; import importlib.util; assert importlib.util.find_spec('pip') is None"
       - name: Exact worker GeoTIFF and GDAL/PROJ projection
         if: matrix.name == 'worker'
         run: |
-          docker run --rm -i --network none -e DB_PASS=ci_placeholder -e JWT_SECRET=ci_placeholder localhost/eris/worker:candidate python - <<'PY'
+          docker run --rm -i --network none -e DB_PASS=ci_placeholder -e JWT_SECRET=ci_placeholder -e S3_ACCESS_KEY=ci_s3_access -e S3_SECRET_KEY=ci_s3_secret localhost/eris/worker:candidate python - <<'PY'
           import importlib.util
           import numpy as np
           import rasterio
@@ -161,3 +161,35 @@ jobs:
           path: ${{ runner.temp }}/rehearsal.log
           if-no-files-found: ignore
           retention-days: 30
+  handoff:
+    name: Checksummed five-image handoff candidate
+    needs: [images, podman, rehearsal]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: candidate-*
+          path: ${{ runner.temp }}/candidates
+      - uses: actions/download-artifact@v4
+        with:
+          name: rootless-rehearsal
+          path: ${{ runner.temp }}/recovery
+      - name: Test package integrity checks
+        run: python3 -m unittest discover -s scripts/handover -p 'test_*.py' -v
+      - name: Bind clean scans, image archives, source and recovery evidence
+        run: >-
+          python3 scripts/handover/build_image_package.py
+          --candidates "$RUNNER_TEMP/candidates"
+          --source-commit "$(git rev-parse HEAD)"
+          --rehearsal-log "$RUNNER_TEMP/recovery/rehearsal.log"
+          --output "$RUNNER_TEMP/ERIS-image-handoff"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ERIS-image-handoff
+          path: ${{ runner.temp }}/ERIS-image-handoff/
+          compression-level: 0
+          retention-days: 90

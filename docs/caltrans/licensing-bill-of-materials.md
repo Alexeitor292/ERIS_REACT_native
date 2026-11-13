@@ -98,6 +98,12 @@ and a separately authorized `ARCGIS_API_KEY` in the server configuration.
 that is not production acceptance. SDK upgrades, including 300.x, require a
 fresh licensing/lifecycle review.
 
+Esri treats Runtime **100.x and 200.x license strings as compatible**; an older
+string is not invalid merely because the SDK APIs changed. The separate
+license-string boundary starts at 300.x. Confirm the actual level, expiry and
+capabilities with the production SDK and package.
+[Esri's license-string version rule](https://developers.arcgis.com/swift/license-and-deployment/use-a-license-in-your-app/).
+
 ## Web ArcGIS services and usage
 
 The website is a static React/Vite application using `@arcgis/core`, served by

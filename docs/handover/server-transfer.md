@@ -100,6 +100,14 @@ Record safe identifiers and secret-store references instead.
 
 ## Final cutover and rollback
 
+Before changing iOS bundle IDs/signing teams or removing the personal app,
+have every phone reconnect to its current endpoint and confirm its outbox is
+empty. Resolve rejected/conflicting changes and verify uploaded photos on the
+server. The agency app has a separate sandbox/Keychain context; installing it
+does not move local drafts/photos from the personal app. A server backup does
+not contain unsent device work. Retain the old app and endpoint until this
+reconciliation is complete; do not uninstall it as a troubleshooting shortcut.
+
 - The owner approves the target, change window, data scope and rollback decision
   maker. Announce a write freeze; stop web/API/worker writers on the source
   during the **final** matched capture and leave the source read-only/stopped
@@ -128,6 +136,10 @@ Record safe identifiers and secret-store references instead.
 | Host/edge configuration | systemd unit/overrides, active volume selection, firewall, DNS/TLS/proxy/tunnel details, schedules and logs |
 | Custody/access | Agency Git, Harbor/Jenkins, identity, Apple/Intune, GIS licensing, backup and domain administrators |
 | Release evidence | Image SBOMs/scans/signatures, source commit, acceptance and restore/rollback records |
+
+The [five-image candidate package](image-package.md) supplies reproducible
+image/source/scan and synthetic recovery evidence. Agency runtime configuration,
+signatures and the actual server's recovery set still travel separately.
 
 The public-source archive intentionally cannot substitute for these restricted
 operational materials. Use the [package builder](../../scripts/handover/build_package.py)

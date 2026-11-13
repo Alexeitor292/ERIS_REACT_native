@@ -133,6 +133,14 @@ real agency build settings and device acceptance; neither uses Campos Labs signi
 
 ## Privacy manifest and release review
 
+MSAL is pinned to [Microsoft's 2.18.1 release](https://github.com/AzureAD/microsoft-authentication-library-for-objc/releases/tag/2.18.1).
+The [2.x migration requirements](https://github.com/AzureAD/microsoft-authentication-library-for-objc/blob/2.18.1/docs/MSAL_2x_Migration_Guide.md)
+are applied: the app supplies its explicit `msauth.<bundle id>://auth` redirect
+and a presenting controller attached to a window. Register that exact redirect
+in Entra for each approved bundle ID. Keep the SDK's redirect validation enabled.
+Interactive sign-in, Authenticator return, silent renewal and Conditional Access
+still require the enrolled-device acceptance in the handover checklist.
+
 `ERIS/PrivacyInfo.xcprivacy` records the required reasons for the APIs the app
 and its ERISKit package currently call: UserDefaults (`CA92.1`) for app-owned
 preferences, file timestamps (`C617.1`) for its offline cache, and system boot

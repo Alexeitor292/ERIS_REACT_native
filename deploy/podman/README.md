@@ -6,8 +6,11 @@ Linux host, rootless service account with subordinate UID/GID ranges, Podman
 5.x, Bash, Python 3, curl and the standard coreutils. Native secrets require
 `podman secret create --replace`; test that capability on the chosen host.
 
-API and worker run as UID/GID **10001:10001**, with all capabilities dropped
-and `no-new-privileges`. `db.env`, `storage.env`, `app.env` and bootstrap inputs
+API and worker run as UID/GID **10001:10001**; nginx runs as **101:101** on
+container port 8080. All three drop every capability and set `no-new-privileges`.
+The pod publishes host port 8080 to nginx 8080 and host 9800 to S3 8333, on
+loopback or an explicitly configured private interface for the trusted gateway.
+`db.env`, `storage.env`, `app.env` and bootstrap inputs
 must be 600/400 before the script reads them. Keep `secrets/` mode 700 and each
 regular file mode 600. Symlinks/subdirectories are refused.
 

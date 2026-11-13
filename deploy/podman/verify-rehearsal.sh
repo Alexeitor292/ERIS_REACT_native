@@ -39,7 +39,9 @@ for pair in eris-mariadb:ERIS_DB_IMAGE eris-seaweedfs:ERIS_STORAGE_IMAGE eris-ap
   fi
   expected="$(sed -n "s/^${var}=//p" "$images_env" 2>/dev/null | tail -n 1)"
   actual="$(podman inspect --format '{{.ImageName}}' "$container")"
-  if [[ -n "$expected" && "$actual" != "$expected" ]]; then
+  if [[ -z "$expected" ]]; then
+    fail "images.env does not name $var"
+  elif [[ "$actual" != "$expected" ]]; then
     fail "$container runs $actual but images.env names $expected (recreate the pod after a release)"
   elif [[ ! "$actual" =~ ^[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[a-f0-9]{64}$ ]]; then
     gate "$container image is not pinned by digest: $actual"
@@ -73,14 +75,34 @@ sys.exit(bool(problems))
   else gate "$container runtime posture failed: ${posture:-inspection did not run}"; fi
 done
 
+# Nginx has no Python runtime. Check both the exec identity and its PID1 master.
+if podman exec eris-web sh -ec '
+# ERIS_WEB_RUNTIME_POSTURE
+test "$(id -u)" = 101
+awk '\''
+  $1 == "Uid:" { if ($3 != 101) exit 1; uid = 1 }
+  $1 == "CapEff:" { if ($2 !~ /^0+$/) exit 1; caps = 1 }
+  $1 == "NoNewPrivs:" { if ($2 != 1) exit 1; nnp = 1 }
+  END { if (!uid || !caps || !nnp) exit 1 }
+'\'' /proc/1/status
+' >/dev/null 2>&1; then
+  pass "eris-web runtime UID, capabilities and NoNewPrivs"
+else
+  gate "eris-web runtime posture failed: UID101, empty capabilities and NoNewPrivs are required"
+fi
+
 # --- Image signatures ----------------------------------------------------------
 # Podman enforces cosign signatures at pull time when the service account's
 # policy requires them for the Harbor project (deploy/podman/signature-policy).
-api_ref="$(sed -n 's/^ERIS_API_IMAGE=//p' "$images_env" 2>/dev/null | tail -n 1)"
-repo_prefix="${api_ref%/*}"
 policy_file="${XDG_CONFIG_HOME:-$HOME/.config}/containers/policy.json"
 [[ -f "$policy_file" ]] || policy_file=/etc/containers/policy.json
-if [[ -n "$repo_prefix" && -f "$policy_file" ]] && python3 - "$policy_file" "$repo_prefix" <<'PY'
+declare -A required_prefixes=()
+while IFS= read -r ref; do
+  [[ "$ref" == */* ]] && required_prefixes["${ref%/*}"]=1
+done < <(sed -nE 's/^ERIS_(API|WORKER|WEB|DB|STORAGE)_IMAGE=//p' "$images_env" 2>/dev/null)
+[[ "${#required_prefixes[@]}" -gt 0 ]] || gate "no image repository prefixes found for signature verification"
+for repo_prefix in "${!required_prefixes[@]}"; do
+if [[ -f "$policy_file" ]] && python3 - "$policy_file" "$repo_prefix" <<'PY'
 import json, os, sys
 try:
     policy = json.load(open(sys.argv[1]))
@@ -88,14 +110,15 @@ try:
     assert policy.get("default") == [{"type": "reject"}]
     assert rules and all(r.get("type") == "sigstoreSigned" and os.path.isabs(r.get("keyPath", ""))
                          and os.path.isfile(r["keyPath"]) for r in rules)
-except (OSError, ValueError, AssertionError, TypeError):
+except (OSError, ValueError, AssertionError, TypeError, AttributeError):
     sys.exit(1)
 PY
 then
   pass "Podman requires cosign signatures for $repo_prefix ($policy_file)"
 else
-  gate "no Podman signature policy requires signatures for ${repo_prefix:-the ERIS images}"
+  gate "no Podman signature policy requires signatures for $repo_prefix"
 fi
+done
 
 # --- Host exposure -----------------------------------------------------------
 ports="$(podman pod inspect --format '{{json .InfraConfig.PortBindings}}' eris 2>/dev/null || true)"
@@ -103,16 +126,24 @@ if [[ -z "$ports" ]]; then
   fail "cannot read pod port bindings"
 else
   exposure="$(python3 - "$ports" <<'PY'
-import json, sys
+import ipaddress, json, sys
 try:
     ports = json.loads(sys.argv[1])
-    extra = set(ports) - {"80/tcp", "8333/tcp"}
+    extra = set(ports) - {"8080/tcp", "8333/tcp"}
     if extra:
         print("unexpected/internal port " + ", ".join(sorted(extra)) + " is published on the host")
-    elif any(not ports.get(p) for p in ("80/tcp", "8333/tcp")):
+    elif any(not ports.get(p) for p in ("8080/tcp", "8333/tcp")):
         print("web/S3 ports are not published as expected")
-    elif any(str(binding.get("HostPort")) != expected for p, expected in (("80/tcp", "8080"), ("8333/tcp", "9800")) for binding in ports[p]):
+    elif any(str(binding.get("HostPort")) != expected for p, expected in (("8080/tcp", "8080"), ("8333/tcp", "9800")) for binding in ports[p]):
         print("web/S3 host ports are not 8080/9800")
+    else:
+        private_networks = tuple(ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"))
+        for bindings in ports.values():
+            for binding in bindings:
+                address = ipaddress.ip_address(binding.get("HostIp", ""))
+                if not (address.is_loopback or any(address in network for network in private_networks)):
+                    print("web/S3 must bind to loopback or a private host interface, not a public or wildcard address")
+                    sys.exit(0)
 except (ValueError, TypeError, AttributeError):
     print("cannot parse pod port bindings")
 PY

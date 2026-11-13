@@ -139,7 +139,7 @@ case "${1:-}" in
     if podman pod exists eris; then echo "Pod eris exists; use status or an explicit stop/update." >&2; exit 2; fi
     podman volume exists "$ERIS_DB_VOLUME" || podman volume create "$ERIS_DB_VOLUME" >/dev/null
     podman volume exists "$ERIS_STORAGE_VOLUME" || podman volume create "$ERIS_STORAGE_VOLUME" >/dev/null
-    podman pod create --name eris -p "${ERIS_BIND_IP}:8080:80" -p "${ERIS_BIND_IP}:9800:8333" >/dev/null
+    podman pod create --name eris -p "${ERIS_BIND_IP}:8080:8080" -p "${ERIS_BIND_IP}:9800:8333" >/dev/null
     podman run -d --restart=unless-stopped --pod eris --name eris-mariadb --env-file "$DEPLOY/db.env" \
       -v "$ERIS_DB_VOLUME:/var/lib/mysql" -v "$ROOT/database/init:/docker-entrypoint-initdb.d:ro,Z" "$ERIS_DB_IMAGE" >/dev/null
     ready=0
@@ -164,6 +164,7 @@ case "${1:-}" in
     run_tool python -m app.tools.adopt_existing_admin
     if [[ -f "$DEPLOY/bootstrap.env" ]]; then
       podman run --rm --pod eris --env-file "$DEPLOY/app.env" --env-file "$DEPLOY/bootstrap.env" \
+        --user 10001:10001 --cap-drop=ALL --security-opt=no-new-privileges \
         "$ERIS_API_IMAGE" python -m app.tools.bootstrap_initial_admin
     else
       run_tool python -m app.tools.bootstrap_initial_admin
@@ -177,7 +178,8 @@ case "${1:-}" in
       --cap-drop=ALL --security-opt=no-new-privileges \
       --user 10001:10001 \
       "$ERIS_WORKER_IMAGE" python -m app.worker.offline_scene_worker >/dev/null
-    podman run -d --restart=unless-stopped --pod eris --name eris-web "$ERIS_WEB_IMAGE" >/dev/null
+    podman run -d --restart=unless-stopped --pod eris --name eris-web \
+      --user 101:101 --cap-drop=ALL --security-opt=no-new-privileges "$ERIS_WEB_IMAGE" >/dev/null
     wait_for_api
     echo "ERIS pod started on ${ERIS_BIND_IP}:8080 (web/API) and :9800 (S3)."
     ;;

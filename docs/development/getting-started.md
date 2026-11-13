@@ -20,11 +20,15 @@ mentioned here is described in [configuration.md](../operations/configuration.md
 ```bash
 cd deploy/compose
 cp .env.example .env    # then replace every CHANGE_ME value
-docker compose up -d
+docker compose up -d --build
 ```
 
-This starts MariaDB (port 3306), SeaweedFS (S3 API on 9800) and
-Adminer (8081). The SeaweedFS admin port is not published.
+This starts MariaDB (localhost port 3306) and SeaweedFS (localhost S3 API on 9800).
+The SeaweedFS admin port is not published. MariaDB and SeaweedFS build from the
+repository's patched recipes. Adminer is an optional development utility:
+`docker compose --profile db-tools up -d adminer` (localhost 8081). It is not
+part of the five-image deployment package or approved production stack. See
+[Compose notes](../../deploy/compose/README.md).
 
 On its **first** start MariaDB runs the files in `database/init/`: it creates the
 schema, the eight roles and the organization structure. It creates **no

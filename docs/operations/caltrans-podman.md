@@ -25,8 +25,8 @@ Record these before production cutover:
 
 | Item | Required decision |
 | --- | --- |
-| Host | Linux distribution, Podman version (5.x preferred), rootless service account, CPU/RAM, disk and SELinux policy. Budget at least 8 GB RAM for runtime; size disk for database, evidence and terrain packages. |
-| Harbor | Host/project, robot pull credentials on server, robot push credentials in Jenkins, image scanning policy, and mirror locations for MariaDB 11 and SeaweedFS 4.50. Pin approved digests for production. |
+| Host | Linux distribution, Podman 5.x with native-secret replacement support, rootless service account, CPU/RAM, disk and SELinux policy. Budget at least 8 GB RAM for runtime; size disk for database, evidence and terrain packages. |
+| Harbor | Host/project, robot pull credentials on server, robot push credentials in Jenkins, image scanning policy, and approved MariaDB 11.8 / SeaweedFS 4.53 candidates. Pin approved digests for production. |
 | TLS and DNS | Browser URL (for example `https://eris.example.gov`) and S3 URL (`https://eris-files.example.gov`). A proxy on the same host uses `127.0.0.1:8080` and `127.0.0.1:9800`. A remote proxy needs the pod ports bound to a private host interface with firewall rules. Preserve S3 `Host`, path, query and percent encoding. Upload body limit must exceed `MAX_UPLOAD_MB` (default 95 MB). |
 | Entra | Workforce tenant ID, authority cloud (`login.microsoftonline.com` or Azure Government `login.microsoftonline.us`), web app client ID, the client **certificate** (issued by Caltrans PKI or self-signed, per policy), the mobile app registration if mobile is in scope, app registration owner, and the first administrator's **user object ID**. Register web redirect URI exactly `https://eris.example.gov/api/auth/entra/callback`. Single-tenant app; no group or app role grants ERIS privileges. |
 | Network | Outbound HTTPS to the chosen Entra authority for sign-in and signing keys; Harbor; optional USGS, Caltrans and other GIS services for terrain jobs; optional SMTP and APNs push. Browsers and future phones must reach both URLs. |
@@ -88,8 +88,9 @@ No Jenkins job exists yet: everything it needs is in this repository.
    private key, one key per host) and `eris-known-hosts` (secret file)
    ([releases from Jenkins](#releases-from-jenkins-no-shell-access-for-jenkins)).
 5. **Save**, then **Build with Parameters**. The first run lists the
-   parameters; set `HARBOR_HOST`, `HARBOR_PROJECT`, `MARIADB_SOURCE` and
-   `SEAWEEDFS_SOURCE` to the Caltrans values and leave `DEPLOY_TO=none`
+   parameters; set `HARBOR_HOST` and `HARBOR_PROJECT`. Leave `MARIADB_SOURCE` and
+   `SEAWEEDFS_SOURCE` blank to build the repository's patched recipes, or supply
+   approved agency mirrors. Leave `DEPLOY_TO=none`
    until a staging host is ready.
 
 Success: the build is green and archives `release/release-images.env`, the
@@ -104,6 +105,7 @@ The job needs these three Jenkins credentials to publish:
 | `harbor-eris-robot` | Username/password | Harbor robot with push (and signature push) rights on the ERIS project |
 | `eris-cosign-key` | Secret file | The release signing private key (`cosign.key`, encrypted) |
 | `eris-cosign-password` | Secret text | That key's password |
+| `eris-arcgis-web-key` | Secret text | Agency-owned, origin-restricted browser ArcGIS key; its value becomes public in the web bundle |
 
 IT creates the signing key pair once, with `cosign generate-key-pair` run
 offline. The private key and password live only in those Jenkins credentials.
@@ -113,8 +115,10 @@ For each release (`HARBOR_HOST`, `HARBOR_PROJECT`, an immutable `RELEASE_TAG`):
 
 1. **Validate.** Syntax-check all scripts, and run the deployment and
    release-gate script tests against stub Podman.
-2. **Build.** Build API, worker and web, labelled with the source commit and
-   tag. Python compiles, and the web bundle builds in a plain Podman container
+2. **Build.** Build API, worker, web and the two vendor recipes (unless approved
+   mirrors were selected), labelled with the source commit and tag. Refresh
+   base images and OS layers without using stale build cache. Python compiles,
+   and the web bundle builds in a plain Podman container
    (`deploy/podman/build-web.sh`; Podman/Buildah 4.9 mis-resolved a Lit
    package inside a Dockerfile `RUN`).
 3. **Backend security tests.** Sessions, CSRF, route guards, Entra
@@ -128,9 +132,8 @@ For each release (`HARBOR_HOST`, `HARBOR_PROJECT`, an immutable `RELEASE_TAG`):
    [`.trivyignore`](../../.trivyignore), each with a reason, an approver and an
    expiry, reviewed like code.
 5. **Publish, sign and attest.**
-   - The IT-approved MariaDB and SeaweedFS mirrors (`MARIADB_SOURCE`,
-     `SEAWEEDFS_SOURCE`) pass the same gate.
-   - The three ERIS images are pushed, and the digests Harbor stored are
+   - All five images, including optional mirrors, pass the gate before any push.
+   - All five images are pushed, and the digests Harbor stored are
      recorded.
    - All five digests are signed with [cosign](https://docs.sigstore.dev/)
      using the Caltrans key, and each SBOM is attached as a signed CycloneDX
@@ -373,7 +376,8 @@ refuses a client secret outright.
 3. `app.env` names the files as the API sees them:
    `ENTRA_CLIENT_CERT_FILE=/run/secrets/eris/entra-client.crt` and
    `ENTRA_CLIENT_KEY_FILE=/run/secrets/eris/entra-client.key`. `eris-pod.sh`
-   mounts `deploy/podman/secrets` read-only into the API container only. It
+   imports regular files from `deploy/podman/secrets` into Podman's secret store
+   and maps them read-only into the API only, UID/GID 10001 and mode 0400. It
    refuses to start if the folder or its files are readable by others.
 4. `bash deploy/podman/eris-pod.sh cert-check` prints the certificate's
    thumbprint (compare it with the one Entra lists) and its expiry. It fails
