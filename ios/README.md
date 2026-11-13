@@ -9,7 +9,7 @@ this Swift project exclusively; the retired React Native/Expo project has been r
 | --- | --- |
 | `ERISKit/` | Swift package: models, API client, sign-in orchestration, role and notification rules. No UIKit, so its tests also run on Linux. |
 | `ERIS/` | The app: SwiftUI screens, MSAL token provider, Keychain session store, push registration. |
-| `project.yml` | XcodeGen definition. CI generates and commits `ERIS.xcodeproj`; edit this file, not the project. |
+| `project.yml` | XcodeGen definition. Edit this file, regenerate `ERIS.xcodeproj` with XcodeGen and commit both. CI verifies they match; it does not write back to Git. |
 
 ## On the Caltrans Mac (Xcode only, no other tools)
 

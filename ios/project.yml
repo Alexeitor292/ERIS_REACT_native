@@ -1,5 +1,6 @@
-# XcodeGen definition of the ERIS iOS app. CI generates ios/ERIS.xcodeproj from
-# this file and commits it, so the Mac needs only Xcode: open ERIS.xcodeproj.
+# XcodeGen definition of the ERIS iOS app. Regenerate ios/ERIS.xcodeproj after
+# changing this file and commit both. CI checks freshness and never writes Git.
+# The receiving Mac can open the committed ERIS.xcodeproj using only Xcode.
 # Change targets, settings or packages here, never in the .xcodeproj.
 name: ERIS
 options:

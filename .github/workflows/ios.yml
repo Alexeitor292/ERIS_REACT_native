@@ -1,9 +1,9 @@
 name: iOS
 
 # The native Swift ERIS iOS app (ios/). ERISKit's tests run on Linux (cheap);
-# only when they pass does the macOS job build the app with Xcode. The macOS
-# job also commits the Xcode project generated from ios/project.yml, so the
-# Caltrans Mac needs nothing but Xcode to open it.
+# only when they pass does the macOS job build every app configuration with
+# Xcode. The committed project must match ios/project.yml, so the Caltrans Mac
+# needs only Xcode to open it. CI never writes source back to the repository.
 on:
   push:
     branches: [main]
@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ios-${{ github.ref }}
@@ -71,26 +71,32 @@ jobs:
         run: |
           brew install xcodegen
           xcodegen generate --spec ios/project.yml
-      - name: Build for the iOS simulator
+      - name: Check the committed project is current
+        run: >-
+          git diff --exit-code -- ios/ERIS.xcodeproj ||
+          (echo 'Regenerate with xcodegen generate --spec ios/project.yml and commit ios/ERIS.xcodeproj.' && exit 1)
+      - name: Build Debug, Staging and Release for the iOS simulator
         run: |
           set -o pipefail
-          xcodebuild -project ios/ERIS.xcodeproj -scheme ERIS -configuration Debug \
-            -destination 'generic/platform=iOS Simulator' \
-            -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO build 2>&1 | tee build.log | grep -E "error:|warning: .*ERIS|BUILD (SUCCEEDED|FAILED)" || true
-          grep -q "BUILD SUCCEEDED" build.log
+          for configuration in Debug Staging Release; do
+            xcodebuild -project ios/ERIS.xcodeproj -scheme ERIS -configuration "$configuration" \
+              -destination 'generic/platform=iOS Simulator' \
+              -derivedDataPath "$RUNNER_TEMP/ERIS-derived-data" \
+              -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO build 2>&1 \
+              | tee "build-$configuration.log" \
+              | grep -E "error:|warning: .*ERIS|BUILD (SUCCEEDED|FAILED)" || true
+            grep -q "BUILD SUCCEEDED" "build-$configuration.log"
+          done
       - name: Upload the build log
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: xcodebuild-log
-          path: build.log
+          path: build-*.log
           if-no-files-found: ignore
-      - name: Commit the generated Xcode project
-        if: github.event_name == 'push' && github.ref != 'refs/heads/main'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add ios/ERIS.xcodeproj
-          if git diff --cached --quiet; then echo "Xcode project unchanged"; exit 0; fi
-          git commit -m "Regenerate ios/ERIS.xcodeproj from project.yml"
-          git push
+      - name: Upload the generated project for review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-xcode-project
+          path: ios/ERIS.xcodeproj
