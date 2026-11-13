@@ -430,6 +430,15 @@ class Settings(BaseSettings):
             )
         return s
 
+    @field_validator("ENV")
+    @classmethod
+    def _normalize_environment(cls, value: str) -> str:
+        # Other modules compare the canonical value when choosing secure cookies,
+        # seed safeguards and production posture. Never let the documented
+        # "production" alias bypass the same checks as "prod".
+        normalized = value.strip().lower()
+        return "prod" if normalized in {"prod", "production"} else normalized
+
     @model_validator(mode="after")
     def _validate_smtp_tls(self):
         # STARTTLS upgrades a plaintext connection after EHLO; SMTP_SSL opens an
@@ -452,7 +461,7 @@ class Settings(BaseSettings):
         if self.ENV.strip().lower() != "prod":
             return self
         secret = self.JWT_SECRET or ""
-        if len(secret) < 32 or "CHANGE_ME" in secret:
+        if len(secret) < 32 or any(marker in secret.upper() for marker in ("CHANGE_ME", "CHANGE_THIS")):
             raise ValueError("ENV=prod requires JWT_SECRET of at least 32 random characters")
         if not 5 <= self.SESSION_ABSOLUTE_MINUTES <= 720:
             raise ValueError("ENV=prod requires SESSION_ABSOLUTE_MINUTES between 5 and 720")

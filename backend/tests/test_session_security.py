@@ -355,21 +355,30 @@ def _settings(**overrides):
     return Settings(**values)
 
 
-def test_production_accepts_a_strong_key_and_bounded_sessions():
-    assert _settings().SESSION_ABSOLUTE_MINUTES == 720
+@pytest.mark.parametrize("environment", ["prod", "production", " PROD ", "PRODUCTION", " Production\t"])
+def test_production_accepts_a_strong_key_and_bounded_sessions(environment):
+    production = _settings(ENV=environment)
+    assert production.ENV == "prod"
+    assert production.SESSION_ABSOLUTE_MINUTES == 720
 
 
+@pytest.mark.parametrize("environment", ["prod", "production", " PRODUCTION "])
 @pytest.mark.parametrize("overrides", [
     {"JWT_SECRET": "short"},
     {"JWT_SECRET": "CHANGE_ME_AT_LEAST_32_RANDOM_BYTES"},
+    {"JWT_SECRET": "CHANGE_THIS_TO_A_LONG_RANDOM_STRING"},
     {"SESSION_ABSOLUTE_MINUTES": 60 * 24 * 30},
     {"SESSION_IDLE_MINUTES": 2},
     {"SESSION_IDLE_MINUTES": 800},
     {"WEB_BASE_URL": "http://eris.example.test"},
+    {"APNS_ENABLED": True, "APNS_KEY_ID": ""},
+    {"ENTRA_ENABLED": True, "ENTRA_CLIENT_CERT_FILE": "", "ENTRA_CLIENT_KEY_FILE": ""},
+    {"ENTRA_ENABLED": True, "ENTRA_CLIENT_CERT_FILE": "/run/secrets/eris/client.crt",
+     "ENTRA_CLIENT_KEY_FILE": "/run/secrets/eris/client.key", "ENTRA_CLIENT_SECRET": "forbidden"},
 ])
-def test_production_refuses_weak_session_settings(overrides):
+def test_production_refuses_weak_session_settings(environment, overrides):
     with pytest.raises(ValueError):
-        _settings(**overrides)
+        _settings(ENV=environment, **overrides)
 
 
 def test_development_keeps_its_placeholder_key():
