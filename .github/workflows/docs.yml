@@ -78,7 +78,7 @@ jobs:
         run: python scripts/docs/generate_schema_docs.py --url "mysql+pymysql://root:rootpassword@127.0.0.1:3306/eris_docs"
       - name: Upload the generated files
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: generated-docs
           path: |
