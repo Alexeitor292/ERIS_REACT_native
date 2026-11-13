@@ -6,6 +6,7 @@ export type SingleSignOnInputs = {
   isInitializing: boolean;
   entraReason: string | null;
   signedOut: boolean;
+  guidedDemoEnabled?: boolean;
 };
 
 /**
@@ -19,6 +20,7 @@ export type SingleSignOnInputs = {
 export function shouldStartSingleSignOn(inputs: SingleSignOnInputs): boolean {
   return (
     inputs.methodsKnown &&
+    !inputs.guidedDemoEnabled &&
     inputs.entraEnabled &&
     !inputs.localLoginEnabled &&
     !inputs.signedIn &&

@@ -18,8 +18,7 @@ they appear in the expanded "Field meanings & raw values" section.
 
 | Location | Purpose |
 |----------|---------|
-| `mobile/src/roadInventory/roadInventoryGlossary.ts` | Full glossary + `explainRoadInventoryField()` helper |
-| `web/src/utils/roadInventoryGlossary.ts` | Web-only mirror with `friendlyFieldLabel()`, `friendlyFieldValue()`, `fieldDescription()`, `terrainLabel()` |
+| `web/src/utils/roadInventoryGlossary.ts` | Glossary with `friendlyFieldLabel()`, `friendlyFieldValue()`, `fieldDescription()`, `terrainLabel()` |
 
 ## Field display rules
 
@@ -68,7 +67,7 @@ version was used. Both keys map to the same value map.
 
 ## How to add new field definitions
 
-In `mobile/src/roadInventory/roadInventoryGlossary.ts` (and mirror in `web/src/utils/roadInventoryGlossary.ts`), add an entry to `FIELD_DEFS`:
+In `web/src/utils/roadInventoryGlossary.ts`, add an entry to `FIELD_DEFS`:
 
 ```typescript
 my_field_name: {

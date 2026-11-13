@@ -1,6 +1,14 @@
 # ERIS deployment briefing for Caltrans IT
 
-**Discussion copy — 2026-10-26, updated 2026-10-28.** This describes the proposed Caltrans deployment, not an approved Caltrans production service. The [four-page PDF handout](eris-caltrans-it-briefing.pdf) is for calls (regenerated 2026-10-28 with `scripts/build_caltrans_it_briefing.py`; see the [readiness audit](readiness-audit.md)); the [operator runbook](../operations/caltrans-podman.md) has commands and configuration details. Record Caltrans decisions in the table near the end before a production date is set.
+**Discussion copy — updated November 13, 2026.** Project owner: **Deh Jeng Jang**.
+The outgoing maintainer leaves at the end of November. Agency staging and
+production hosting are pending IT assignment. This describes the target
+service, not an approved deployment. Use the [current handoff and IT request](../handover/server-transfer.md),
+[security assessment](../security/review-2026-11-13.md), and
+[licensing bill of materials](licensing-bill-of-materials.md) for the meeting.
+The [October PDF handout](eris-caltrans-it-briefing.pdf) is historical and
+predates the November security, licensing and ownership updates. The
+[operator runbook](../operations/caltrans-podman.md) contains commands.
 
 ## The 60-second explanation
 
@@ -21,7 +29,7 @@ flowchart LR
         direction LR
         Web[nginx and React web] -->|localhost 8000| API[FastAPI]
         API -->|localhost 3306| DB[(MariaDB 11)]
-        API -->|localhost 8333| S3[SeaweedFS 4.50 S3]
+        API -->|localhost 8333| S3[SeaweedFS 4.53 S3]
         Worker[Terrain job worker] --> DB
         Worker --> S3
         DB --> DBVolume[(Persistent database volume)]
@@ -63,20 +71,20 @@ flowchart LR
     Start --> Verify[Health, Entra, permissions,<br/>file transfer, restart and restore tests]
 ```
 
-The supplied [`Jenkinsfile.podman`](../../deploy/ci/Jenkinsfile.podman) **builds, gates, signs and publishes**, and can optionally release to staging and then production (below). After the deployment-script and backend security tests, [Trivy](https://trivy.dev/) writes a CycloneDX **SBOM** for each image and **fails the release** on a fixable HIGH/CRITICAL vulnerability or an embedded secret, before anything is pushed. Exceptions need a reasoned, expiring entry in `.trivyignore`. The two IT-approved third-party mirrors pass the same gate. All five digests are then **signed with cosign** using a Caltrans-held key, each SBOM is attached as a signed attestation in Harbor (no public transparency log), and each signature is verified. The build archives `release-images.env` (five digests), the SBOMs, the scan reports and the public key. On the host, a Podman signature policy rejects any ERIS image whose signature does not verify, and `ERIS_REQUIRE_DIGESTS=true` refuses tags. Jenkins needs an approved **Linux** agent with Podman, Harbor reachability, memory for the web build's 4 GiB Node heap, and three credentials: the `harbor-eris-robot` push robot, the cosign key file and its password. The tool images should be mirrored into Harbor; an offline agent also needs the Trivy database mirrored. The host gets a separate pull-only robot. [Harbor supports project robot permissions](https://goharbor.io/cli-docs/cli-docs/harbor-project-robot-create/), [vulnerability scanning](https://goharbor.io/docs/main/administration/vulnerability-scanning/) and cosign signature enforcement as additional gates, subject to Caltrans configuration.
+The supplied [`Jenkinsfile.podman`](../../deploy/ci/Jenkinsfile.podman) **builds, gates, signs and publishes**, and can optionally release to staging and then production (below). After the deployment-script and backend security tests, [Trivy](https://trivy.dev/) writes a CycloneDX **SBOM** for each image and **fails the release** on a known vulnerabilities at all severities vulnerability or an embedded secret, before anything is pushed. Exceptions need a reasoned, expiring entry in `.trivyignore`. The two IT-approved third-party mirrors pass the same gate. All five digests are then **signed with cosign** using a Caltrans-held key, each SBOM is attached as a signed attestation in Harbor (no public transparency log), and each signature is verified. The build archives `release-images.env` (five digests), the SBOMs, the scan reports and the public key. On the host, a Podman signature policy rejects any ERIS image whose signature does not verify, and `ERIS_REQUIRE_DIGESTS=true` refuses tags. Jenkins needs an approved **Linux** agent with Podman, Harbor reachability, memory for the web build's 4 GiB Node heap, and three credentials: the `harbor-eris-robot` push robot, the cosign key file and its password. The tool images should be mirrored into Harbor; an offline agent also needs the Trivy database mirrored. The host gets a separate pull-only robot. [Harbor supports project robot permissions](https://goharbor.io/cli-docs/cli-docs/harbor-project-robot-create/), [vulnerability scanning](https://goharbor.io/docs/main/administration/vulnerability-scanning/) and cosign signature enforcement as additional gates, subject to Caltrans configuration.
 
 ## Stack and data
 
 | Layer | Proposed component | What persists |
 | --- | --- | --- |
-| Web | nginx 1.27 Alpine serving React 19 / Vite 7 / Tailwind 4 | No application data; replaceable image |
+| Web | nginx 1.30.6 Alpine (nonroot) serving React 19 / Vite 7 / Tailwind 4 | No application data; replaceable image |
 | API | Python 3.12, FastAPI, SQLAlchemy, Alembic | Reads/writes MariaDB and S3 |
 | Worker | Separate Python/GIS image, background terrain job processor | Jobs/results in MariaDB and S3 |
 | Relational database | MariaDB 11 | Users and ERIS roles, organizations, incidents, assessments, workflow state, metadata, audit/event records, object references |
-| Object store | SeaweedFS 4.50 S3 interface | Photos, attachments, generated PDFs, offline terrain/road packages |
+| Object store | SeaweedFS 4.53 S3 interface | Photos, attachments, generated PDFs, offline terrain/road packages |
 | Outside pod | Caltrans TLS gateway, Jenkins, Harbor, Entra, backup/monitoring | Owned and operated per Caltrans policy |
 
-The [SeaweedFS 4.50 source tag carries an Apache-2.0 license](https://github.com/seaweedfs/seaweedfs/blob/4.50/LICENSE); the [MariaDB Server project states GPLv2](https://mariadb.org/about/). These references are a starting point for Caltrans's review of the **exact images, dependencies, redistribution obligations, and support model**, not a completed license approval. The proposed SeaweedFS image is the community project, not SeaweedFS Enterprise.
+The [SeaweedFS 4.53 source tag carries an Apache-2.0 license](https://github.com/seaweedfs/seaweedfs/blob/4.53/LICENSE); the [MariaDB Server project states GPLv2](https://mariadb.org/about/). These references are a starting point for Caltrans's review of the **exact images, dependencies, redistribution obligations, and support model**, not a completed license approval. The proposed SeaweedFS image is the community project, not SeaweedFS Enterprise.
 
 ### Simplified relational view
 
@@ -142,14 +150,14 @@ Write down a named owner and answer for each row. An unresolved item is a deploy
 | 1 | Who provides the **web** and **file** DNS names, TLS certificates, gateway, WAF, and firewall rules? Is the gateway co-hosted or remote? | Determines `WEB_BASE_URL`, `S3_PUBLIC_ENDPOINT`, callback, and bind address. |
 | 1 | Which Entra tenant/cloud is used? Who owns the Web app registration, exact redirect URI, client **certificate** (PKI or self-signed) and its rotation, first admin object ID, and Conditional Access tests? | Production requires a certificate credential; no client secret is used. |
 | 1 | Do the 30-minute idle and 12-hour absolute session limits meet policy? Who disables ERIS accounts at offboarding? | Session settings and the offboarding procedure. |
-| 1 | Who owns the Harbor project, Jenkins agent, cosign signing key, mirrored tool images and the vulnerability-exception approvals? May Jenkins reach the hosts over SSH (forced-command deploy key) and who approves production releases? | The pipeline signs with a Caltrans-held key and fails on fixable HIGH/CRITICAL findings; releases self-verify and roll back. Without SSH from Jenkins, operators run one command. |
+| 1 | Who owns the Harbor project, Jenkins agent, cosign signing key, mirrored tool images and the vulnerability-exception approvals? May Jenkins reach the hosts over SSH (forced-command deploy key) and who approves production releases? | The pipeline signs with a Caltrans-held key and fails on known vulnerabilities at all severities findings; releases self-verify and roll back. Without SSH from Jenkins, operators run one command. |
 | 1 | Where will encrypted **matched DB + S3 + config** backups go? What are retention, RPO/RTO, and restore-test requirements? | Single-host failure otherwise loses the service. |
 | 1 | Is a single-host service interruption acceptable, or does Caltrans require a failover target? | This deployment has no automatic failover; RPO/RTO alone does not settle availability. |
-| 1 | Is browser 3D ArcGIS or Esri offline processing required in the first release? Who supplies a restricted browser API key? | The current Podman web build does not pass `VITE_ARCGIS_API_KEY`; Esri-specific worker sidecars need configuration and a staged test. |
-| 2 | Which outbound services may the host and clients reach: Entra, Harbor, GIS, SMTP, Expo? Are proxies required? | Core sign-in needs Entra; optional features have different egress. Measuring a site needs the API to reach `elevation.nationalmap.gov`, and Terrain Cross Sections needs browsers to reach it and `index.nationalmap.gov`. |
+| 1 | Is browser 3D ArcGIS or Esri offline processing required in the first release? Who supplies a restricted browser API key? | The pipeline requires an agency-owned browser key at build time. Native licensing and optional Esri processing need approved inputs and staged tests. |
+| 2 | Which outbound services may the host and clients reach: Entra, Harbor, GIS, SMTP, APNs? Are proxies required? | Core sign-in needs Entra; optional features have different egress. Measuring a site needs the API to reach `elevation.nationalmap.gov`, and Terrain Cross Sections needs browsers to reach it and `index.nationalmap.gov`. |
 | 2 | Who receives logs/alerts, owns incidents and patch windows, and approves go-live/rollback? | Defines the operating model. |
 | 2 | What penetration test, accessibility, privacy, records-retention, and change-control evidence is required? | Prevents a late approval surprise. |
-| 2 | For the ERIS iOS app: confirm the Conditional Access grant (a Caltrans iPhone check suggests **compliant device**, not app protection); allow the ERIS bundle ID in the Enterprise SSO plug-in; register ERIS Mobile (iOS platform, bundle ID); and name owners for the Enterprise distribution certificate, the yearly provisioning profile renewal, the APNs auth key and the Intune line-of-business assignment. | The app will be native Swift with MSAL, and push uses APNs; the server side is done. |
+| 2 | For the ERIS iOS app: confirm the Conditional Access grant (a Caltrans iPhone check suggests **compliant device**, not app protection); allow the ERIS bundle ID in the Enterprise SSO plug-in; register ERIS Mobile (iOS platform, bundle ID); select a supported custom-app or Enterprise distribution path, and name owners for agency signing, provisioning, APNs and Intune assignments. | Native Swift/MSAL and APNs server integration are implemented; agency sign-in, push and distribution still require enrolled-device acceptance. |
 
 ## What to hand out
 
@@ -163,14 +171,14 @@ Write down a named owner and answer for each row. An unresolved item is a deploy
 | --- | --- |
 | “Is this one image?” | No. It is one Podman pod with five containers and two persistent volumes. |
 | “Where do the images come from?” | Caltrans Jenkins builds our three application images from an approved commit and pushes them to Caltrans Harbor. IT mirrors the MariaDB and SeaweedFS images. The host pulls five approved digests. |
-| “What about SeaweedFS licensing?” | The upstream 4.50 source tag carries Apache-2.0; Caltrans must review the exact image and dependency inventory. No SeaweedFS Enterprise image is in this design. |
+| “What about SeaweedFS licensing?” | The upstream 4.53 source tag carries Apache-2.0; Caltrans must review the exact image and dependency inventory. No SeaweedFS Enterprise image is in this design. |
 | “Do you require a managed database?” | The supplied design uses MariaDB 11 in the pod. If policy requires a managed DB or external object store, we must adjust and test the topology. |
-| “What leaves the network?” | Entra and Harbor are required for the proposed flow. GIS, SMTP, and Expo depend on enabled features. Browsers also fetch map/data sources where configured. We need an approved egress inventory for their environment. |
+| “What leaves the network?” | Entra and Harbor are required for the proposed flow. GIS, SMTP, and APNs depend on enabled features. Browsers also fetch map/data sources where configured. We need an approved egress inventory for their environment. |
 | “Do people use passwords?” | No. Caltrans production is Entra SSO only; ERIS refuses to create or reset passwords. MFA and device rules come from Caltrans Conditional Access. |
 | “Who can become an administrator?” | Only an authorized ERIS admin grants ERIS roles. Entra authentication alone does not grant ERIS access; users are prelinked by tenant and object ID. |
 | “Will disabling an Entra user immediately stop ERIS?” | It blocks new sign-ins at once. An existing ERIS session lasts until its 30-minute idle limit, unless the ERIS account is also disabled or signed out everywhere, which takes effect at the next request. |
 | “Is this highly available?” | No. A single host is a single point of failure; recovery is from a tested matched backup. |
-| “Is the mobile app ready?” | Not yet. It will be a native Swift iPhone app (no Android), signed with Caltrans's Enterprise developer account and delivered through Intune and Company Portal. It signs in with MSAL through Microsoft Authenticator and receives push through APNs. The server side (token exchange, sessions, revocation, APNs sender) is implemented and tested; see the [iOS app specification](../development/ios.md). |
+| “Is the mobile app ready?” | The native Swift iPhone app (no Android) builds in CI. Agency signing, Entra, push, offline work and Intune installation/update still require acceptance. Select the agency custom-app or Enterprise distribution path; the existing membership type is not confirmed. It signs in with MSAL through Microsoft Authenticator and receives push through APNs. The server side (token exchange, sessions, revocation, APNs sender) is implemented and tested; see the [iOS app specification](../development/ios.md). |
 | “Is security approval complete?” | No Caltrans approval is claimed. Implemented and tested in code: server-side sessions, SSO-only sign-in, certificate credential, signed and SBOM-attested images with a vulnerability gate, and backups. Caltrans identity, scan policy, gateway, logging, recovery and governance checks remain. |
 
 ## Decision record for the call

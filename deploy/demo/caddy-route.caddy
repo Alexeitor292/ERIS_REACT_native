@@ -1,0 +1,28 @@
+# Place before the general ERIS host handler inside the existing site block.
+# The demo's static assets use /demo/ so they never replace portal assets.
+@eris_demo {
+  host eris.camposlabs.org
+  path /demo /demo/*
+}
+handle @eris_demo {
+  route {
+    # Check the real ERIS session before serving any demo HTML, code, or asset.
+    forward_auth 192.168.20.216:8080 {
+      uri /api/auth/me
+      # Serialize auth checks so simultaneous asset loads cannot race the session touch.
+      transport http {
+        max_conns_per_host 1
+      }
+      @signed_out status 401 403
+      handle_response @signed_out {
+        redir * /login?demo=1 303
+      }
+    }
+    uri strip_prefix /demo
+    reverse_proxy 192.168.20.216:8081 {
+      # The static mock service must never receive the real session credential.
+      header_up -Cookie
+      header_up -Authorization
+    }
+  }
+}

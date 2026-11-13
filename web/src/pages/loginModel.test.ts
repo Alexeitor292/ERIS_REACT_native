@@ -41,3 +41,8 @@ test("a deployment that still offers passwords shows the page", () => {
   assert.equal(shouldStartSingleSignOn({ ...ssoOnly, localLoginEnabled: true }), false);
   assert.equal(shouldStartSingleSignOn({ ...ssoOnly, entraEnabled: false }), false);
 });
+
+test("demo-enabled staging leaves the demo invitation visible before SSO", () => {
+  assert.equal(shouldStartSingleSignOn({ ...ssoOnly, guidedDemoEnabled: true }), false);
+  assert.equal(shouldStartSingleSignOn({ ...ssoOnly, guidedDemoEnabled: false }), true);
+});

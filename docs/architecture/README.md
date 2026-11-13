@@ -46,7 +46,7 @@ flowchart LR
     gw["TLS gateway<br/>(Caltrans)"]
 
     subgraph pod["Podman pod 'eris' (one network namespace)"]
-        web["eris-web<br/>nginx: static SPA,<br/>/api reverse proxy<br/>:80"]
+        web["eris-web<br/>nginx: static SPA,<br/>/api reverse proxy<br/>:8080"]
         api["eris-api<br/>FastAPI (uvicorn)<br/>:8000"]
         worker["eris-worker<br/>offline-scene job worker"]
         db[("eris-mariadb<br/>MariaDB 11<br/>:3306")]
@@ -256,21 +256,11 @@ and Guests land on **Incidents**. The routes and their role gates are in
 `web/src/App.tsx` and `web/src/utils/roleModel.ts`. The client hides what a role
 cannot use, and the server enforces it.
 
-## The Expo mobile app (reference)
+## Native Swift iOS app
 
-Tabs by role (`mobile/app/(tabs)/_layout.tsx`):
-
-- **Incidents** for every work role: Maintenance reporters and Staff file reports with
-  the phone's GPS, route and postmile, or a map; chiefs follow
-  their cases.
-- **Drafts** and **Submissions** for Staff, Senior Specialists and
-  administrators, who fill technical forms, with offline drafts that sync when
-  the phone is back online.
-- **Assessments** for work roles other than Maintenance.
-- A Guest who signs in is told to use the web app.
-
-Maps, the site photo map and offline 3D terrain use native iOS screens
-(`mobile/plugins/arcgis-ios/`). See [offline-terrain.md](offline-terrain.md).
+The supported mobile app is in `ios/`, using SwiftUI and ERISKit. The retired
+React Native/Expo project has been removed. See the [native app README](../../ios/README.md)
+for supported screens, offline behavior, maps, Xcode setup, and device checks.
 
 ## External services
 
@@ -290,9 +280,8 @@ Maps, the site photo map and offline 3D terrain use native iOS screens
 ```
 backend/     API, worker, migrations, tests (pytest), backend/.env.example
 web/         Web app, its Dockerfile and nginx.conf
-mobile/      Mobile app, native iOS plugin, source-contract scripts
 database/    init/ (first-boot schema and seed) and dev/ (mock accounts, dev-only scripts)
-ios/         Native Swift iPhone app (branch claude/ios-swift-app): ERISKit + SwiftUI app
+ios/         Native Swift iPhone app: ERISKit + SwiftUI app
 deploy/      podman/ (Caltrans pod scripts, env templates, tests), ci/ (Jenkinsfile,
              release gate), compose/ (Docker Compose for development and the legacy stack)
 docs/        This documentation; decisions/ holds architecture decision records

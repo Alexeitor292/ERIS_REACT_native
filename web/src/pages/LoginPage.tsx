@@ -50,7 +50,7 @@ export default function LoginPage() {
     } catch {
       // Browser storage may be unavailable under hardened/private policies.
     }
-    return { entraReason, signedOut, expired };
+    return { entraReason, signedOut, expired, demo: new URLSearchParams(window.location.search).get("demo") === "1" };
   });
   const [redirecting, setRedirecting] = useState(false);
 
@@ -84,6 +84,7 @@ export default function LoginPage() {
   // web apps: on a managed Windows device Entra usually signs the person in
   // with their dot.ca.gov account and applies MFA and Conditional Access.
   const autoStart = shouldStartSingleSignOn({
+    guidedDemoEnabled: appConfig.guidedDemoEnabled,
     methodsKnown,
     entraEnabled: methods.entra_enabled,
     localLoginEnabled: methods.local_login_enabled,
@@ -98,9 +99,13 @@ export default function LoginPage() {
     window.location.assign(`${appConfig.apiBaseUrl}/auth/entra/start`);
   }, [autoStart]);
 
+  useEffect(() => {
+    if (signedIn && me && arrival.demo && appConfig.guidedDemoEnabled) window.location.replace("/demo/");
+  }, [signedIn, me, arrival.demo]);
+
   if (isInitializing || redirecting) return <AuthGateLoading />;
   // Signed in already: on to this person's own landing.
-  if (signedIn && me) return <Navigate to={landingPathFor(me.roles, hasMaintenanceDuties(me))} replace />;
+  if (signedIn && me) return arrival.demo && appConfig.guidedDemoEnabled ? <AuthGateLoading /> : <Navigate to={landingPathFor(me.roles, hasMaintenanceDuties(me))} replace />;
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -114,6 +119,7 @@ export default function LoginPage() {
     setBusy(true);
     try {
       const account = await login(normalizedEmail, password);
+      if (arrival.demo && appConfig.guidedDemoEnabled) { window.location.assign("/demo/"); return; }
       // The mobile app's opening animation, over the landing page as it loads.
       playSplash();
       navigate(landingPathFor(account.roles, hasMaintenanceDuties(account)), { replace: true });
@@ -162,6 +168,8 @@ export default function LoginPage() {
                 <h2 className="text-2xl font-semibold">Sign in to ERIS</h2>
                 <p className="mt-2 text-sm leading-6 text-muted">Use your authorized ERIS account to continue.</p>
               </div>
+
+              {appConfig.guidedDemoEnabled ? <a href="/login?demo=1" className="mt-6 block rounded-lg border border-[var(--brand)] bg-[var(--panel-soft)] px-4 py-3 text-center font-semibold text-[var(--brand-ink)]">{arrival.demo ? "Sign in below to open Guided Demo" : "Guided Demo"} <span className="mt-1 block text-xs font-normal text-muted">For authorized ERIS users. Sign-in required; all demo records are fictional.</span></a> : null}
 
               {notice ? (
                 <div className="mt-5 rounded-lg border border-[color:color-mix(in_oklab,var(--brand)_35%,var(--line))] bg-[color:color-mix(in_oklab,var(--brand)_8%,transparent)] px-3 py-2.5 text-sm">

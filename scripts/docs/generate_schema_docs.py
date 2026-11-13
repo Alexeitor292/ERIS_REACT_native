@@ -28,7 +28,8 @@ REFERENCE = ROOT / "docs" / "data" / "schema-reference.md"
 DOMAINS: list[tuple[str, str, list[str]]] = [
     ("Identity and access", "Accounts, roles, sessions, Entra links, first-admin marker.",
      [r"^users$", r"^roles$", r"^user_roles$", r"^user_sessions$", r"^user_external_identities$",
-      r"^user_saved_layouts$", r"^deployment_bootstrap$", r"^role_consolidation_audit$"]),
+      r"^user_saved_layouts$", r"^deployment_bootstrap$", r"^role_consolidation_audit$",
+      r"^user_delegations$", r"^delegated_actions$"]),
     ("Organization", "GeoTech offices, branches, districts, coverage and where people sit.",
      [r"^org_", r"^geotech_office_routing$"]),
     ("Incidents", "Field reports, locations, routing, assignments and event groups.",
@@ -40,7 +41,7 @@ DOMAINS: list[tuple[str, str, list[str]]] = [
     ("Attachments", "Photos and files (bytes in S3), capture metadata and corrections.",
      [r"^attachment"]),
     ("Notifications", "The notification feed, push devices and the email outbox.",
-     [r"^user_notifications$", r"^push_devices$", r"^incident_notifications$", r"^email_", r"^notification"]),
+     [r"^user_notifications$", r"^push_devices$", r"^incident_notifications$", r"^email_", r"^notification", r"^immediate_action_deliveries$"]),
     ("Maintenance workflows", "District maintenance work definitions and runs.",
      [r"^maintenance_"]),
     ("Projects", "Caltrans projects linked to incidents.",

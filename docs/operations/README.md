@@ -16,6 +16,11 @@ part runs: [deployment topologies](../architecture/deployment-topologies.md).
 
 ## The three environments
 
+This section describes the **target** agency environments. On November 13,
+2026, the existing staging service is still on personal Campos Labs servers;
+Caltrans IT hosting is pending. Use the [environment worksheet](../handover/environment-setup.md)
+and [server transfer plan](../handover/server-transfer.md) to establish it.
+
 ```mermaid
 flowchart LR
     subgraph dev["Development"]
@@ -103,14 +108,16 @@ release, restore and rotation is rehearsed there first.
    bash deploy/podman/eris-pod.sh up
    bash deploy/podman/eris-pod.sh status
    bash deploy/podman/eris-pod.sh cert-check
-   bash deploy/podman/verify-rehearsal.sh https://<staging web host> https://<staging file host>
+   ERIS_VERIFY_PROFILE=production bash deploy/podman/verify-rehearsal.sh https://<staging-web-host> https://<staging-file-host>
    ```
 7. **Systemd:** install `deploy/podman/eris.service.example` as the service
    account's user unit and enable it, so the pod survives reboots.
 8. **Jenkins:** add the staging host's forced-command key
    ([releases from Jenkins](caltrans-podman.md#releases-from-jenkins-no-shell-access-for-jenkins)).
-9. **Accounts:** sign in as the bootstrap administrator, link test users, run
-   `eris-pod.sh handover-check`, delete `bootstrap.env`.
+9. **Accounts:** sign in as the bootstrap administrator, establish two active
+   Entra-linked administrators who each sign in, and link test users. Delete
+   `bootstrap.env`, then run `eris-pod.sh handover-check` and repeat production
+   verification. Those checks intentionally fail while bootstrap remains.
 
 ### Test data
 

@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import logging
 import smtplib
+import ssl
 import time
 from email.message import EmailMessage
 from email.utils import formataddr, formatdate, make_msgid
@@ -230,13 +231,13 @@ def send_email(to: str, subject: str, body: str) -> None:
     port = int(settings.SMTP_PORT)
     timeout = int(settings.SMTP_TIMEOUT_S)
     if settings.SMTP_SSL:
-        client = smtplib.SMTP_SSL(host, port, timeout=timeout)
+        client = smtplib.SMTP_SSL(host, port, timeout=timeout, context=ssl.create_default_context())
     else:
         client = smtplib.SMTP(host, port, timeout=timeout)
     try:
         client.ehlo()
         if settings.SMTP_STARTTLS and not settings.SMTP_SSL:
-            client.starttls()
+            client.starttls(context=ssl.create_default_context())
             client.ehlo()
         if settings.SMTP_USER:
             client.login(settings.SMTP_USER, settings.SMTP_PASSWORD or "")

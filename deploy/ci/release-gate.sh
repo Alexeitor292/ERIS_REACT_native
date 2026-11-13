@@ -10,7 +10,7 @@
 #
 # scan: writes OUTDIR/NAME.cdx.json (CycloneDX SBOM of every package) and
 #   OUTDIR/NAME.vulns.json, and exits 1 when the image has a vulnerability of
-#   TRIVY_SEVERITY (default HIGH,CRITICAL) with a fix available, or an embedded
+#   TRIVY_SEVERITY (default all severities), even without a fix, or an embedded
 #   secret. Accepted exceptions live in .trivyignore, each with a reason and an
 #   expiry, reviewed like code.
 # sign: signs the digest (never a tag) with the Caltrans cosign key and attaches
@@ -19,13 +19,18 @@
 #
 # Environment: TRIVY_IMAGE, COSIGN_IMAGE, TRIVY_SEVERITY, TRIVY_DB_REPOSITORY
 # (Harbor mirror of the vulnerability database), TRIVY_CACHE_DIR, COSIGN_KEY_FILE,
-# COSIGN_PASSWORD, REGISTRY_AUTH_FILE (the podman login --authfile JSON).
+# COSIGN_PASSWORD, REGISTRY_AUTH_FILE (the podman login --authfile JSON),
+# COSIGN_REGISTRY_CA_FILE (optional private registry CA), COSIGN_NETWORK (optional
+# Podman network; the isolated TLS-registry integration test uses host/loopback).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-TRIVY_IMAGE="${TRIVY_IMAGE:-docker.io/aquasec/trivy:0.58.1}"
-COSIGN_IMAGE="${COSIGN_IMAGE:-ghcr.io/sigstore/cosign/cosign:v2.4.1}"
-TRIVY_SEVERITY="${TRIVY_SEVERITY:-HIGH,CRITICAL}"
+TRIVY_IMAGE="${TRIVY_IMAGE:-docker.io/aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb}"
+# No implicit signer: even the latest upstream release can contain vulnerable
+# dependencies. Jenkins builds/audits the repository recipe by default; direct
+# callers must explicitly select their built and scanned tool image.
+COSIGN_IMAGE="${COSIGN_IMAGE:-}"
+TRIVY_SEVERITY="${TRIVY_SEVERITY:-UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL}"
 IGNORE_FILE="$ROOT/.trivyignore"
 
 die() { echo "release-gate: $*" >&2; exit 2; }
@@ -43,19 +48,40 @@ trivy() {
 
 cosign() {
   local keydir="$1" sbomdir="$2"; shift 2
+  [[ -n "$COSIGN_IMAGE" ]] || die "COSIGN_IMAGE must name a built and scanned signing tool (deploy/images/Dockerfile.cosign)"
   local auth
   auth="$(mktemp -d)"
   # cosign reads registry credentials from $DOCKER_CONFIG/config.json.
   [[ -z "${REGISTRY_AUTH_FILE:-}" ]] || cp "$REGISTRY_AUTH_FILE" "$auth/config.json"
+  [[ ! -f "$auth/config.json" ]] || chmod 600 "$auth/config.json"
+  local network_args=() ca_args=() args=("$@")
+  [[ -z "${COSIGN_NETWORK:-}" ]] || network_args+=(--network "$COSIGN_NETWORK")
+  if [[ -n "${COSIGN_REGISTRY_CA_FILE:-}" ]]; then
+    [[ -f "$COSIGN_REGISTRY_CA_FILE" ]] || { rm -rf -- "$auth"; die "registry CA file is missing"; }
+    local registry_ca
+    registry_ca="$(cd "$(dirname "$COSIGN_REGISTRY_CA_FILE")" && pwd)/$(basename "$COSIGN_REGISTRY_CA_FILE")"
+    ca_args+=(-v "$registry_ca:/registry-ca.crt:ro,Z")
+    case "${args[0]}" in
+      sign|attest|verify|verify-attestation) args+=(--registry-cacert /registry-ca.crt) ;;
+    esac
+  fi
   local status=0
-  podman run --rm -e COSIGN_PASSWORD -e DOCKER_CONFIG=/auth -v "$auth:/auth:ro,Z" -v "$keydir:/keys:ro,Z" \
-    -v "$sbomdir:/sbom:ro,Z" "$COSIGN_IMAGE" "$@" || status=$?
+  # The distroless image's default UID65532 cannot read host-private mode-600
+  # files. Keep the rootless service account's identity instead; do not loosen
+  # the key/auth permissions. State is disposable and credentials stay read-only.
+  podman run --rm --userns=keep-id --user "$(id -u):$(id -g)" \
+    --cap-drop=ALL --security-opt=no-new-privileges --read-only \
+    --workdir /tmp --tmpfs /tmp:rw,noexec,nosuid,size=64m,mode=1777 \
+    "${network_args[@]}" "${ca_args[@]}" -e COSIGN_PASSWORD -e HOME=/tmp -e DOCKER_CONFIG=/auth \
+    -v "$auth:/auth:ro,Z" -v "$keydir:/keys:ro,Z" \
+    -v "$sbomdir:/sbom:ro,Z" "$COSIGN_IMAGE" "${args[@]}" || status=$?
   rm -rf -- "$auth"
   return "$status"
 }
 
 require_digest() {
-  [[ "$1" == *@sha256:* ]] || die "sign and verify digests, never tags: $1"
+  [[ "$1" =~ ^[a-zA-Z0-9][a-zA-Z0-9./:_-]*@sha256:[a-f0-9]{64}$ ]] \
+    || die "sign and verify a complete sha256 digest, never tags or malformed references: $1"
 }
 
 case "${1:-}" in
@@ -71,15 +97,15 @@ case "${1:-}" in
     trivy "$work" image --input /work/image.tar --format cyclonedx --output /work/sbom.cdx.json
     gate=0
     trivy "$work" image --input /work/image.tar --scanners vuln,secret --severity "$TRIVY_SEVERITY" \
-      --ignore-unfixed --ignorefile /policy/.trivyignore --exit-code 1 --format json --output /work/vulns.json || gate=$?
+      --ignorefile /policy/.trivyignore --exit-code 1 --format json --output /work/vulns.json || gate=$?
     cp "$work/sbom.cdx.json" "$out/$name.cdx.json"
     cp "$work/vulns.json" "$out/$name.vulns.json"
     trivy "$work" convert --format table /work/vulns.json || true
     if [[ "$gate" != 0 ]]; then
-      echo "release-gate: $name FAILED: fixable $TRIVY_SEVERITY vulnerabilities or embedded secrets (see $name.vulns.json)" >&2
+      echo "release-gate: $name FAILED: $TRIVY_SEVERITY vulnerabilities or embedded secrets (see $name.vulns.json)" >&2
       exit 1
     fi
-    echo "release-gate: $name passed ($TRIVY_SEVERITY with a fix available, secrets); SBOM $name.cdx.json"
+    echo "release-gate: $name passed ($TRIVY_SEVERITY, including unfixed findings, secrets); SBOM $name.cdx.json"
     ;;
   sign)
     ref="${2:?$0 sign IMAGE@sha256:... SBOM}" sbom="${3:?sbom}"
@@ -88,8 +114,14 @@ case "${1:-}" in
     [[ -f "$key" && -f "$sbom" ]] || die "missing cosign key or SBOM"
     keydir="$(cd "$(dirname "$key")" && pwd)" keyname="$(basename "$key")"
     sbomdir="$(cd "$(dirname "$sbom")" && pwd)" sbomname="$(basename "$sbom")"
-    cosign "$keydir" "$sbomdir" sign --yes --key "/keys/$keyname" --tlog-upload=false "$ref"
+    # Podman's sigstoreSigned policy consumes legacy .sig attachments. Cosign3
+    # supports this explicit compatibility mode; its defaults use newer bundles.
+    cosign "$keydir" "$sbomdir" sign --yes --key "/keys/$keyname" --tlog-upload=false \
+      --new-bundle-format=false --use-signing-config=false --registry-referrers-mode=legacy "$ref"
+    # In Cosign3.1.4 only sign accepts --registry-referrers-mode. Attest and
+    # verify use the legacy tag writer/reader when --new-bundle-format=false.
     cosign "$keydir" "$sbomdir" attest --yes --key "/keys/$keyname" --tlog-upload=false \
+      --new-bundle-format=false --use-signing-config=false \
       --type cyclonedx --predicate "/sbom/$sbomname" "$ref"
     echo "release-gate: signed $ref and attached its SBOM"
     ;;
@@ -98,7 +130,8 @@ case "${1:-}" in
     require_digest "$ref"
     [[ -f "$pub" ]] || die "missing public key $pub"
     keydir="$(cd "$(dirname "$pub")" && pwd)"
-    cosign "$keydir" "$keydir" verify --key "/keys/$(basename "$pub")" --insecure-ignore-tlog=true "$ref" >/dev/null
+    cosign "$keydir" "$keydir" verify --key "/keys/$(basename "$pub")" --insecure-ignore-tlog=true \
+      --new-bundle-format=false "$ref" >/dev/null
     echo "release-gate: signature verified for $ref"
     ;;
   public-key)

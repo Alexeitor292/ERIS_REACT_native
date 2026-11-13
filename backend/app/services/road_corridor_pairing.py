@@ -243,7 +243,9 @@ _ID_HASH_LEN = 12
 
 
 def _h(blob: str) -> str:
-    return hashlib.sha1(blob.encode("utf-8")).hexdigest()[:_ID_HASH_LEN]
+    # Stable geometry identifiers, never signatures, passwords or integrity checks.
+    # Preserve existing IDs while explicitly avoiding a cryptographic SHA-1 use.
+    return hashlib.sha1(blob.encode("utf-8"), usedforsecurity=False).hexdigest()[:_ID_HASH_LEN]
 
 
 def _canon_json(obj) -> str:

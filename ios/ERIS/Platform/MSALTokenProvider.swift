@@ -11,14 +11,20 @@ import UIKit
 final class MSALTokenProvider: EntraTokenProvider, @unchecked Sendable {
     private var application: MSALPublicClientApplication?
     private var applicationKey: String?
+    private enum ConfigurationError: Error { case missingBundleIdentifier }
 
     private func client(for config: EntraMobileConfig) throws -> MSALPublicClientApplication {
         let key = "\(config.authority)|\(config.clientId)"
         if let application, applicationKey == key { return application }
         guard let url = URL(string: config.authority) else { throw AuthError.untrustedAuthority }
         let authority = try MSALAADAuthority(url: url)
-        // redirectUri nil = msauth.<bundle id>://auth, as registered for ERIS Mobile.
-        let configuration = MSALPublicClientApplicationConfig(clientId: config.clientId, redirectUri: nil,
+        // MSAL 2.x requires an explicit, broker-capable redirect. This matches
+        // Info.plist for the actual build; register it for ERIS Mobile in Entra.
+        guard let bundleIdentifier = Bundle.main.bundleIdentifier, !bundleIdentifier.isEmpty else {
+            throw ConfigurationError.missingBundleIdentifier
+        }
+        let redirectURI = "msauth.\(bundleIdentifier)://auth"
+        let configuration = MSALPublicClientApplicationConfig(clientId: config.clientId, redirectUri: redirectURI,
                                                               authority: authority)
         let created = try MSALPublicClientApplication(configuration: configuration)
         application = created
@@ -29,7 +35,8 @@ final class MSALTokenProvider: EntraTokenProvider, @unchecked Sendable {
     func acquireTokenInteractively(_ config: EntraMobileConfig) async throws -> String {
         let application = try client(for: config)
         let presenter = try await MainActor.run { () throws -> UIViewController in
-            guard let top = UIApplication.shared.topViewController else { throw AuthError.cancelled }
+            guard let top = UIApplication.shared.topViewController,
+                  top.viewIfLoaded?.window != nil else { throw AuthError.cancelled }
             return top
         }
         let parameters = await MainActor.run {

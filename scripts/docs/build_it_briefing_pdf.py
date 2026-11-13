@@ -126,7 +126,7 @@ def runtime_diagram():
                strokeColor=BLUE, strokeWidth=1.2))
     d.add(String(254, 177, "ONE ROOTLESS PODMAN POD", fontName="Helvetica-Bold", fontSize=7.7,
                  fillColor=BLUE))
-    box(d, 255, 116, 103, 42, "nginx + web", "port 80", fill=colors.white)
+    box(d, 255, 116, 103, 42, "nginx + web", "port 8080", fill=colors.white)
     box(d, 382, 116, 118, 42, "FastAPI", "port 8000", fill=colors.white)
     box(d, 255, 57, 103, 42, "Terrain worker", "background jobs", fill=colors.white)
     box(d, 382, 57, 118, 42, "MariaDB 11", "persistent volume", fill=colors.white)

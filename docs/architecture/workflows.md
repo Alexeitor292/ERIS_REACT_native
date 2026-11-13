@@ -8,6 +8,10 @@ branches, district coverage) is maintained as described in
 
 ## At a glance
 
+The [isolated guided demo](../user-guides/guided-demo.md) illustrates the field,
+configured Maintenance, and branch-route assessment workflow with fictional
+records. Its state lives only in the browser and never uses these API routes.
+
 ### End to end, by role
 
 ```mermaid

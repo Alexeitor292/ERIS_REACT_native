@@ -15,6 +15,8 @@ files_url="${2:-}"
 files_url="${files_url%/}"
 DEPLOY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 profile="${ERIS_VERIFY_PROFILE:-rehearsal}"
+case "$profile" in production|rehearsal) ;; *) echo "FAIL ERIS_VERIFY_PROFILE must be production or rehearsal" >&2; exit 2 ;; esac
+command -v python3 >/dev/null || { echo "FAIL python3 is required for deployment verification" >&2; exit 2; }
 failures=0
 warnings=0
 
@@ -37,26 +39,101 @@ for pair in eris-mariadb:ERIS_DB_IMAGE eris-seaweedfs:ERIS_STORAGE_IMAGE eris-ap
   fi
   expected="$(sed -n "s/^${var}=//p" "$images_env" 2>/dev/null | tail -n 1)"
   actual="$(podman inspect --format '{{.ImageName}}' "$container")"
-  if [[ -n "$expected" && "$actual" != "$expected" ]]; then
+  if [[ -z "$expected" ]]; then
+    fail "images.env does not name $var"
+  elif [[ "$actual" != "$expected" ]]; then
     fail "$container runs $actual but images.env names $expected (recreate the pod after a release)"
-  elif [[ "$actual" != *@sha256:* ]]; then
+  elif [[ ! "$actual" =~ ^[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[a-f0-9]{64}$ ]]; then
     gate "$container image is not pinned by digest: $actual"
   else
     pass "$container runs $actual"
   fi
 done
 
+# Inspect the effective process/settings rather than trusting declared flags.
+for container in eris-api eris-worker; do
+  posture="$(podman exec "$container" python -c '
+# ERIS_RUNTIME_POSTURE: never print environment values or validation exceptions.
+import os, sys
+problems = []
+try:
+    from app.config import settings
+    if settings.ENV.strip().lower() != "prod": problems.append("ENV must be prod")
+except Exception:
+    problems.append("application settings could not be loaded")
+try:
+    status = dict(line.split(":", 1) for line in open("/proc/1/status") if ":" in line)
+    if os.geteuid() != 10001 or int(status["Uid"].split()[1]) != 10001: problems.append("effective UID must be 10001")
+    if int(status["CapEff"].strip(), 16) != 0: problems.append("effective capabilities must be empty")
+    if status["NoNewPrivs"].strip() != "1": problems.append("NoNewPrivs must be enabled")
+except Exception:
+    problems.append("process security status could not be inspected")
+print("; ".join(problems))
+sys.exit(bool(problems))
+' 2>/dev/null)"
+  if [[ "$?" == 0 ]]; then pass "$container runtime ENV, UID, capabilities and NoNewPrivs";
+  else gate "$container runtime posture failed: ${posture:-inspection did not run}"; fi
+done
+
+# Nginx has no Python runtime. Check both the exec identity and its PID1 master.
+if podman exec eris-web sh -ec '
+# ERIS_WEB_RUNTIME_POSTURE
+test "$(id -u)" = 101
+awk '\''
+  $1 == "Uid:" { if ($3 != 101) exit 1; uid = 1 }
+  $1 == "CapEff:" { if ($2 !~ /^0+$/) exit 1; caps = 1 }
+  $1 == "NoNewPrivs:" { if ($2 != 1) exit 1; nnp = 1 }
+  END { if (!uid || !caps || !nnp) exit 1 }
+'\'' /proc/1/status
+' >/dev/null 2>&1; then
+  pass "eris-web runtime UID, capabilities and NoNewPrivs"
+else
+  gate "eris-web runtime posture failed: UID101, empty capabilities and NoNewPrivs are required"
+fi
+
 # --- Image signatures ----------------------------------------------------------
 # Podman enforces cosign signatures at pull time when the service account's
 # policy requires them for the Harbor project (deploy/podman/signature-policy).
-api_ref="$(sed -n 's/^ERIS_API_IMAGE=//p' "$images_env" 2>/dev/null | tail -n 1)"
-repo_prefix="${api_ref%/*}"
-policy_file="${XDG_CONFIG_HOME:-$HOME/.config}/containers/policy.json"
+# containers/image resolves policy.json under HOME, independently of XDG_CONFIG_HOME.
+# Inspect the same file Podman actually uses, not an unused strict-looking file.
+policy_file="$HOME/.config/containers/policy.json"
 [[ -f "$policy_file" ]] || policy_file=/etc/containers/policy.json
-if [[ -n "$repo_prefix" && -f "$policy_file" ]] && grep -q "\"$repo_prefix\"" "$policy_file"    && grep -q '"sigstoreSigned"' "$policy_file"; then
-  pass "Podman requires cosign signatures for $repo_prefix ($policy_file)"
+mapfile -t required_refs < <(sed -nE 's/^ERIS_(API|WORKER|WEB|DB|STORAGE)_IMAGE=//p' "$images_env" 2>/dev/null)
+policy_report=""
+if [[ -f "$policy_file" ]] && policy_report="$(python3 - "$policy_file" "${required_refs[@]}" <<'PY'
+import json, os, sys
+ref = "all five images"
+try:
+    policy = json.load(open(sys.argv[1]))
+    assert policy.get("default") == [{"type": "reject"}]
+    scopes = policy.get("transports", {}).get("docker", {})
+    assert len(sys.argv[2:]) == 5
+    for ref in sys.argv[2:]:
+        host = ref.split("/", 1)[0]
+        assert "/" in ref and ("." in host or ":" in host or host == "localhost")
+        repository = ref.split("@", 1)[0]
+        if ":" in repository.rsplit("/", 1)[-1]: repository = repository.rsplit(":", 1)[0]
+        # containers/image checks exact identity, repository, parents, registry,
+        # transport default, then the global default. A permissive image rule
+        # must not be hidden by a strict project-prefix rule.
+        candidates = [ref, repository]
+        while "/" in repository:
+            repository = repository.rsplit("/", 1)[0]
+            candidates.append(repository)
+        rules = next((scopes[scope] for scope in candidates if scope in scopes), scopes.get("", policy["default"]))
+        assert rules and all(r.get("type") == "sigstoreSigned" and os.path.isabs(r.get("keyPath", ""))
+                             and os.path.isfile(r["keyPath"])
+                             and r.get("signedIdentity") == {"type": "matchRepository"}
+                             and set(r) <= {"type", "keyPath", "signedIdentity"} for r in rules)
+except (OSError, ValueError, AssertionError, TypeError, AttributeError, KeyError):
+    print(ref)
+    sys.exit(1)
+PY
+)"
+then
+  pass "Podman requires repository-matched cosign signatures for all five images ($policy_file)"
 else
-  gate "no Podman signature policy requires signatures for ${repo_prefix:-the ERIS images}"
+  gate "no Podman signature policy requires repository-matched signatures for ${policy_report:-all five images}"
 fi
 
 # --- Host exposure -----------------------------------------------------------
@@ -64,11 +141,30 @@ ports="$(podman pod inspect --format '{{json .InfraConfig.PortBindings}}' eris 2
 if [[ -z "$ports" ]]; then
   fail "cannot read pod port bindings"
 else
-  for internal in 3306 8000 8888 9333 23646; do
-    if grep -q "\"$internal/tcp\"" <<<"$ports"; then fail "internal port $internal is published on the host"; fi
-  done
-  grep -q '"80/tcp"' <<<"$ports" && grep -q '"8333/tcp"' <<<"$ports" \
-    && pass "only web (8080) and S3 (9800) are published" || fail "web/S3 ports are not published as expected: $ports"
+  exposure="$(python3 - "$ports" <<'PY'
+import ipaddress, json, sys
+try:
+    ports = json.loads(sys.argv[1])
+    extra = set(ports) - {"8080/tcp", "8333/tcp"}
+    if extra:
+        print("unexpected/internal port " + ", ".join(sorted(extra)) + " is published on the host")
+    elif any(not ports.get(p) for p in ("8080/tcp", "8333/tcp")):
+        print("web/S3 ports are not published as expected")
+    elif any(str(binding.get("HostPort")) != expected for p, expected in (("8080/tcp", "8080"), ("8333/tcp", "9800")) for binding in ports[p]):
+        print("web/S3 host ports are not 8080/9800")
+    else:
+        private_networks = tuple(ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"))
+        for bindings in ports.values():
+            for binding in bindings:
+                address = ipaddress.ip_address(binding.get("HostIp", ""))
+                if not (address.is_loopback or any(address in network for network in private_networks)):
+                    print("web/S3 must bind to loopback or a private host interface, not a public or wildcard address")
+                    sys.exit(0)
+except (ValueError, TypeError, AttributeError):
+    print("cannot parse pod port bindings")
+PY
+)"
+  [[ -z "$exposure" ]] && pass "only web (8080) and S3 (9800) are published" || fail "$exposure"
 fi
 
 # --- Runtime configuration files -------------------------------------------
@@ -80,7 +176,7 @@ done
 [[ -f "$DEPLOY/bootstrap.env" ]] && gate "bootstrap.env still exists; delete it after the initial administrator is seeded"
 
 # --- Public HTTPS endpoints ------------------------------------------------
-[[ "$base_url" == https://* ]] || warn "$base_url is not HTTPS; test through the Caltrans TLS gateway"
+[[ "$base_url" == https://* ]] || gate "$base_url is not HTTPS; test through the Caltrans TLS gateway"
 curl --fail --silent --show-error "$base_url/healthz" >/dev/null && pass "web /healthz" || fail "web /healthz"
 curl --fail --silent --show-error "$base_url/api/health" >/dev/null && pass "API /api/health" || fail "API /api/health"
 for path in /api/docs /api/openapi.json; do
@@ -112,7 +208,7 @@ else
       fail "Entra start did not redirect as expected: ${location:-no redirect}"
     fi
   else
-    warn "Entra sign-in is disabled"
+    gate "Entra sign-in is disabled"
   fi
 fi
 
@@ -126,6 +222,12 @@ case "$cert_status" in
 ' ' ' <<<"$cert_report")" ;;
 esac
 
+if podman exec eris-api python -m app.tools.handover_status >/dev/null 2>&1; then
+  pass "administrator handover check"
+else
+  gate "administrator handover check failed; establish two Entra-linked administrators and retire bootstrap access"
+fi
+
 code="$(status_of "$base_url/api/auth/me")"
 [[ "$code" == 401 ]] && pass "an anonymous request is not signed in" || fail "anonymous /api/auth/me returned $code"
 
@@ -136,12 +238,13 @@ else
   fail "database is not at Alembic head"
 fi
 if [[ -n "$files_url" ]]; then
+  [[ "$files_url" == https://* ]] || gate "$files_url is not HTTPS; signed files need the trusted TLS gateway"
   bucket="$(sed -n 's/^S3_BUCKET=//p' "$DEPLOY/app.env" 2>/dev/null | tail -n 1)"
   code="$(status_of "$files_url/${bucket:-eris-uploads}/")"
   [[ "$code" == 403 || "$code" == 401 ]] && pass "anonymous bucket listing refused ($code)" \
     || fail "anonymous request to $files_url/${bucket:-eris-uploads}/ returned $code; the bucket must be private"
 else
-  warn "S3 hostname not given; pass it as the second argument to check bucket privacy"
+  gate "S3 hostname not given; pass it as the second argument to check bucket privacy"
 fi
 
 echo

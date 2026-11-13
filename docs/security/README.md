@@ -34,6 +34,26 @@ or anything that touches secrets.
 
 ## Trust boundaries
 
+### Guided demo boundary
+
+The optional staging `/demo` is a separate static simulation of the actual
+portal pages, backed by fictional in-memory records and identities. The gateway
+requires an active real ERIS session for every demo page and asset; it strips
+Cookie/Authorization before forwarding to the static service. A periodic
+read-only gateway probe closes an exercise after session loss. The simulation
+never reads or writes real business records or changes the person's real roles.
+
+Before importing the real page components, the demo substitutes the API/auth
+boundaries, shadows browser storage with per-tab memory and installs a network
+guard. It allows static assets and selected public GIS reads; unsupported live
+requests fail closed. Exit, completion, reload and page lifecycle reset the
+fictional state. Hosted portal builds default to hiding the invitation unless
+`VITE_GUIDED_DEMO_ENABLED=true`; this flag controls discoverability, while the
+separate gateway controls access. Hosting the demo in an agency environment is
+an owner/IT scope decision, not an enforced Jenkins promotion gate. See the
+[decision record](../decisions/adr-isolated-guided-demo.md) and
+[operator guide](../user-guides/guided-demo.md).
+
 ```mermaid
 flowchart LR
     subgraph z0["Zone 0: untrusted"]
@@ -132,7 +152,7 @@ flowchart TB
 | Administration | Handover check: two Entra-linked admins, no passwords, bootstrap removed | `eris-pod.sh handover-check` | `deploy/podman/tests` |
 | Files | Private buckets; short presigned URLs on a separate hostname; no bytes in the database | `storage.py` | `tests/test_storage_presign.py`, `verify-rehearsal.sh` |
 | Configuration | Production refuses unsafe settings at startup | `config.py` (`_validate_production_session`) | `tests/test_session_security.py` |
-| Supply chain | SBOM, fixable HIGH/CRITICAL and secret gate, signature and attestation | `deploy/ci/release-gate.sh`, `Jenkinsfile.podman` | `deploy/ci/tests` |
+| Supply chain | SBOM, known vulnerabilities at all severities and secret gate, signature and attestation | `deploy/ci/release-gate.sh`, `Jenkinsfile.podman` | `deploy/ci/tests` |
 | Supply chain | Host runs signed digests only | `deploy/podman/signature-policy/`, `eris-pod.sh` | `deploy/podman/tests`, `verify-rehearsal.sh` |
 | Hosting | Rootless Podman, internal ports unpublished, env files 600, secrets 700 | `eris-pod.sh` | `verify-rehearsal.sh` |
 | Push | APNs token auth, key file mounted read-only, dead tokens retired | `services/apns.py`, `services/push.py` | `tests/test_apns_push.py` |

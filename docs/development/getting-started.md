@@ -8,22 +8,27 @@ mentioned here is described in [configuration.md](../operations/configuration.md
 
 ## Prerequisites
 
-- Docker Desktop (MariaDB and SeaweedFS run in containers).
+- Docker Desktop or an approved compatible container setup (MariaDB and SeaweedFS
+  run in containers). Government Docker Desktop use requires a paid subscription;
+  see the [licensing report](../caltrans/licensing-bill-of-materials.md).
 - Python 3.12 for the backend.
-- Node.js 22 (the CI version) for the web and Expo apps.
-- For the iPhone app: macOS with Xcode ([iOS](ios.md)); for the Expo reference
-  app also CocoaPods.
+- Node.js 22 (the CI version) for the web app.
+- For the iPhone app: macOS with Xcode ([iOS](ios.md)).
 
 ## 1. Start MariaDB and SeaweedFS
 
 ```bash
 cd deploy/compose
 cp .env.example .env    # then replace every CHANGE_ME value
-docker compose up -d
+docker compose up -d --build
 ```
 
-This starts MariaDB (port 3306), SeaweedFS (S3 API on 9800) and
-Adminer (8081). The SeaweedFS admin port is not published.
+This starts MariaDB (localhost port 3306) and SeaweedFS (localhost S3 API on 9800).
+The SeaweedFS admin port is not published. MariaDB and SeaweedFS build from the
+repository's patched recipes. Adminer is an optional development utility:
+`docker compose --profile db-tools up -d adminer` (localhost 8081). It is not
+part of the five-image deployment package or approved production stack. See
+[Compose notes](../../deploy/compose/README.md).
 
 On its **first** start MariaDB runs the files in `database/init/`: it creates the
 schema, the eight roles and the organization structure. It creates **no
@@ -41,11 +46,17 @@ Get-Content -Raw database\dev\030_mock_accounts.sql | docker exec -i eris_mariad
 ```
 
 The order matters: the organization-model migration builds district coverage
-from the accounts it finds. After `alembic upgrade head`, put
-the mock accounts in their places (roles come only from where people sit):
+from the accounts it finds. After completing backend setup and `alembic upgrade head` in step 2, return to
+the repository root and put the mock accounts in their places (roles come only from where people sit):
 
 ```bash
 docker exec -i eris_mariadb sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" "$MARIADB_DATABASE"' < database/dev/040_mock_placements.sql
+```
+
+PowerShell, from the repository root:
+
+```powershell
+Get-Content -Raw database\dev\040_mock_placements.sql | docker exec -i eris_mariadb sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" "$MARIADB_DATABASE"'
 ```
  The accounts, all with password
 `password`, are listed in [roles and permissions](../security/roles-and-permissions.md#mock-accounts-development-and-test-only).
@@ -54,6 +65,9 @@ A database seeded before the `mock.*` addresses can be renamed in place with
 `database/dev/rename_local_accounts.sql`.
 
 ## 2. Backend
+
+Open a new terminal at the repository root. Each component command block assumes
+that starting directory unless it explicitly says otherwise.
 
 ```powershell
 cd backend
@@ -64,7 +78,9 @@ copy .env.example .env                # bash: cp .env.example .env
 ```
 
 In `backend/.env`, make `DB_PASS`, `S3_ACCESS_KEY` and `S3_SECRET_KEY`
-match `deploy/compose/.env`, and set `JWT_SECRET` to any long string.
+match `deploy/compose/.env`, and set `JWT_SECRET` to a generated random value.
+Set `S3_PUBLIC_ENDPOINT=http://127.0.0.1:9800` for signed file downloads.
+See the [matching-values worksheet](../handover/environment-setup.md#local-development-exact-values-that-must-agree).
 Run `python -m app.storage_bootstrap` once to provision the private offline
 scene bucket before starting the worker.
 
@@ -82,7 +98,7 @@ alembic upgrade head
 Run the API with auto-reload on port 8000:
 
 ```bash
-./run.sh        # PowerShell: .\run.ps1   (both run: uvicorn app.asgi:app --reload --host 0.0.0.0 --port 8000)
+bash run.sh        # PowerShell: .\run.ps1   (both run: uvicorn app.asgi:app --reload --host 0.0.0.0 --port 8000)
 ```
 
 The backend **refuses to start** if the database is not at the latest migration.
@@ -104,6 +120,8 @@ Optional helpers:
 
 ## 3. Web app
 
+Open another terminal at the repository root.
+
 ```bash
 cd web
 npm ci
@@ -116,27 +134,7 @@ restart `npm run dev` after changing `web/.env`.
 
 ## 4. Mobile app
 
-The native Swift app is described in [iOS](ios.md). The steps below run the
-Expo reference app ([status](mobile-expo.md)).
-
-The app uses the native ArcGIS Runtime SDK for iOS, so it runs as a development
-build, not in Expo Go.
-
-```bash
-cd mobile
-npm ci
-cp .env.example .env
-npx expo run:ios          # builds the native project and opens the simulator
-```
-
-`expo run:ios` generates `mobile/ios` (not committed) and installs the ArcGIS
-pod through `plugins/withArcGisIos.js`. On a physical device on the same
-network, set `EXPO_PUBLIC_API_URL=http://<your computer's LAN IP>:8000` and
-restart Metro with `npx expo start --clear`. Without it, the app tries the Metro
-host on port 8000.
-
-The Android project builds (`npx expo run:android`), but the native map and
-offline terrain screens are iOS-only.
+The native Swift application is in `ios/`. Follow [iOS](ios.md) and the [native app README](../../ios/README.md) for Xcode setup, simulator builds, and ERISKit tests. React Native, Expo, Metro, and EAS are retired.
 
 ## Tests
 
@@ -146,7 +144,7 @@ offline terrain screens are iOS-only.
 | Backend, database | `python -m pytest tests -m db` | A **disposable** MariaDB at the latest migration, with the mock accounts |
 | Web | `npm test` (from `web/`) | — |
 | Web types and build | `npm run build` | — |
-| Mobile | `npm test`, `npx tsc --noEmit`, `npx expo lint` (from `mobile/`) | — |
+| iOS | `swift test` (from `ios/ERISKit/`) | Swift toolchain; Xcode for the app build |
 
 The database tests create and change records and accounts, so point them at a
 throwaway database rather than the one you develop with. CI builds a fresh
@@ -191,13 +189,11 @@ that file to run them.
   it is a no-op.
 - **Worker image:** builds `backend/Dockerfile.worker` and imports its modules.
 - **Web:** `npm test` and `npm run build`.
-- **Mobile:** the source-contract scripts, lint, types, unit tests and an iOS
-  prebuild.
 - **iOS native compile:** builds the app for the simulator on macOS.
 - **Compose:** renders both Compose files and asserts that the backend and worker
   never receive the browser ArcGIS key.
 
-Four smaller workflows run further mobile source-contract checks: the Esri
+Four smaller workflows run focused native Swift tests: the Esri
 offline terrain contract, the incident map location, the offline incident
 location, and the site photo map.
 

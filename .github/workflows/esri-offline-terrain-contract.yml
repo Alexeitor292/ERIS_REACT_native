@@ -1,28 +1,19 @@
-name: Esri Offline Terrain Contract
-
+name: Esri offline terrain contract
 on:
   pull_request:
-    paths:
-      - 'mobile/plugins/arcgis-ios/ArcGisEristerrainSceneViewController.*'
-      - 'mobile/plugins/withArcGisIos.js'
-      - 'mobile/scripts/check-esri-offline-terrain-contract.mjs'
-      - '.github/workflows/esri-offline-terrain-contract.yml'
+    paths: ["ios/**", ".github/workflows/esri-offline-terrain-contract.yml"]
   push:
     branches: [main]
-    paths:
-      - 'mobile/plugins/arcgis-ios/ArcGisEristerrainSceneViewController.*'
-      - 'mobile/plugins/withArcGisIos.js'
-      - 'mobile/scripts/check-esri-offline-terrain-contract.mjs'
-
+    paths: ["ios/**", ".github/workflows/esri-offline-terrain-contract.yml"]
 jobs:
   contract:
+    name: Esri offline terrain contract
     runs-on: ubuntu-latest
+    container: swift:6.4-noble
     defaults:
       run:
-        working-directory: mobile
+        working-directory: ios/ERISKit
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - run: node scripts/check-esri-offline-terrain-contract.mjs
+      - name: Native Swift contract tests
+        run: swift test --filter 'OfflineSceneTests|TerrainBundleTests|TerrainSurfacePolicyTests'

@@ -25,11 +25,11 @@ Record these before production cutover:
 
 | Item | Required decision |
 | --- | --- |
-| Host | Linux distribution, Podman version (5.x preferred), rootless service account, CPU/RAM, disk and SELinux policy. Budget at least 8 GB RAM for runtime; size disk for database, evidence and terrain packages. |
-| Harbor | Host/project, robot pull credentials on server, robot push credentials in Jenkins, image scanning policy, and mirror locations for MariaDB 11 and SeaweedFS 4.50. Pin approved digests for production. |
+| Host | Linux distribution, Podman 5.x with native-secret replacement support, rootless service account, CPU/RAM, disk and SELinux policy. Budget at least 8 GB RAM for runtime; size disk for database, evidence and terrain packages. |
+| Harbor | Host/project, robot pull credentials on server, robot push credentials in Jenkins, image scanning policy, and approved MariaDB 11.8 / SeaweedFS 4.53 candidates. Pin approved digests for production. |
 | TLS and DNS | Browser URL (for example `https://eris.example.gov`) and S3 URL (`https://eris-files.example.gov`). A proxy on the same host uses `127.0.0.1:8080` and `127.0.0.1:9800`. A remote proxy needs the pod ports bound to a private host interface with firewall rules. Preserve S3 `Host`, path, query and percent encoding. Upload body limit must exceed `MAX_UPLOAD_MB` (default 95 MB). |
 | Entra | Workforce tenant ID, authority cloud (`login.microsoftonline.com` or Azure Government `login.microsoftonline.us`), web app client ID, the client **certificate** (issued by Caltrans PKI or self-signed, per policy), the mobile app registration if mobile is in scope, app registration owner, and the first administrator's **user object ID**. Register web redirect URI exactly `https://eris.example.gov/api/auth/entra/callback`. Single-tenant app; no group or app role grants ERIS privileges. |
-| Network | Outbound HTTPS to the chosen Entra authority for sign-in and signing keys; Harbor; optional USGS, Caltrans and other GIS services for terrain jobs; optional SMTP and Expo push. Browsers and future phones must reach both URLs. |
+| Network | Outbound HTTPS to the chosen Entra authority for sign-in and signing keys; Harbor; optional USGS, Caltrans and other GIS services for terrain jobs; optional SMTP and APNs push. Browsers and future phones must reach both URLs. |
 | Operations | Backup location and retention, restart owner, log collection, RPO/RTO, certificate rotation, secret rotation, maintenance window, and vulnerability scan gate. |
 
 ## Files and secrets
@@ -83,13 +83,14 @@ No Jenkins job exists yet: everything it needs is in this repository.
 3. **Agent:** an approved Linux agent with Podman, repository and Harbor
    access, and room for the web build's 4 GiB Node heap. The pipeline runs
    its tools (Trivy, cosign) as containers, so nothing else is installed.
-4. **Credentials:** the three below for publishing; for deploying, also
+4. **Credentials:** the credentials below for publishing/building; for deploying, also
    `eris-deploy-staging`, `eris-deploy-production` (SSH username with
    private key, one key per host) and `eris-known-hosts` (secret file)
    ([releases from Jenkins](#releases-from-jenkins-no-shell-access-for-jenkins)).
 5. **Save**, then **Build with Parameters**. The first run lists the
-   parameters; set `HARBOR_HOST`, `HARBOR_PROJECT`, `MARIADB_SOURCE` and
-   `SEAWEEDFS_SOURCE` to the Caltrans values and leave `DEPLOY_TO=none`
+   parameters; set `HARBOR_HOST` and `HARBOR_PROJECT`. Leave `MARIADB_SOURCE` and
+   `SEAWEEDFS_SOURCE` blank to build the repository's patched recipes, or supply
+   approved agency mirrors. Leave `DEPLOY_TO=none`
    until a staging host is ready.
 
 Success: the build is green and archives `release/release-images.env`, the
@@ -97,13 +98,14 @@ SBOMs and the scan reports (below).
 
 ### What the pipeline does
 
-The job needs these three Jenkins credentials to publish:
+The job uses these Jenkins credentials:
 
 | Credential ID | Type | Holds |
 | --- | --- | --- |
 | `harbor-eris-robot` | Username/password | Harbor robot with push (and signature push) rights on the ERIS project |
 | `eris-cosign-key` | Secret file | The release signing private key (`cosign.key`, encrypted) |
 | `eris-cosign-password` | Secret text | That key's password |
+| `eris-arcgis-web-key` | Secret text | Agency-owned, origin-restricted browser ArcGIS key; its value becomes public in the web bundle |
 
 IT creates the signing key pair once, with `cosign generate-key-pair` run
 offline. The private key and password live only in those Jenkins credentials.
@@ -113,8 +115,10 @@ For each release (`HARBOR_HOST`, `HARBOR_PROJECT`, an immutable `RELEASE_TAG`):
 
 1. **Validate.** Syntax-check all scripts, and run the deployment and
    release-gate script tests against stub Podman.
-2. **Build.** Build API, worker and web, labelled with the source commit and
-   tag. Python compiles, and the web bundle builds in a plain Podman container
+2. **Build.** Build API, worker, web and the two vendor recipes (unless approved
+   mirrors were selected), labelled with the source commit and tag. Refresh
+   base images and OS layers without using stale build cache. Python compiles,
+   and the web bundle builds in a plain Podman container
    (`deploy/podman/build-web.sh`; Podman/Buildah 4.9 mis-resolved a Lit
    package inside a Dockerfile `RUN`).
 3. **Backend security tests.** Sessions, CSRF, route guards, Entra
@@ -122,15 +126,14 @@ For each release (`HARBOR_HOST`, `HARBOR_PROJECT`, an immutable `RELEASE_TAG`):
 4. **SBOM and vulnerability gate**
    ([`deploy/ci/release-gate.sh`](../../deploy/ci/release-gate.sh)).
    [Trivy](https://trivy.dev/) writes a CycloneDX SBOM of every package in each
-   image. The build fails on a `TRIVY_SEVERITY` (default HIGH,CRITICAL)
-   vulnerability that has a fix available, or on any secret embedded in an
+   image. The build fails on a `TRIVY_SEVERITY` (default all severities)
+   vulnerability, including one without a published fix, or on any secret embedded in an
    image. Nothing is pushed if this fails. Accepted exceptions go in
    [`.trivyignore`](../../.trivyignore), each with a reason, an approver and an
    expiry, reviewed like code.
 5. **Publish, sign and attest.**
-   - The IT-approved MariaDB and SeaweedFS mirrors (`MARIADB_SOURCE`,
-     `SEAWEEDFS_SOURCE`) pass the same gate.
-   - The three ERIS images are pushed, and the digests Harbor stored are
+   - All five images, including optional mirrors, pass the gate before any push.
+   - All five images are pushed, and the digests Harbor stored are
      recorded.
    - All five digests are signed with [cosign](https://docs.sigstore.dev/)
      using the Caltrans key, and each SBOM is attached as a signed CycloneDX
@@ -142,10 +145,19 @@ For each release (`HARBOR_HOST`, `HARBOR_PROJECT`, an immutable `RELEASE_TAG`):
    reports `release/sbom/*.vulns.json` (kept even when the gate fails), and
    `release/cosign.pub`.
 
-Tools run as pinned containers (`TRIVY_IMAGE`, `COSIGN_IMAGE`); mirror both
-into Harbor and pin them by digest. For an agent without internet access,
-mirror the Trivy vulnerability database into Harbor and set
-`TRIVY_DB_REPOSITORY`. Recommended Harbor project settings:
+Trivy is pinned by digest. Jenkins builds the repository's patched Cosign
+candidate when `COSIGN_IMAGE` is blank; an approved mirror override is also
+scanned before key use. Mirror approved tools into Harbor and record their
+exact identities/SBOMs. Direct `publish-release.sh` use requires an explicit
+`COSIGN_IMAGE`; it audits that tool before the five runtime images and any push.
+For private registry PKI, set `COSIGN_REGISTRY_CA_FILE` to the approved PEM CA
+file on the Jenkins agent. Host Podman must also trust that CA. Never use a TLS
+verification bypass. The signer keeps explicit Cosign3 legacy-format options
+for Podman's signature policy; see [supply chain](../security/supply-chain.md).
+
+For an agent without internet access, mirror build sources/dependencies and the
+Trivy vulnerability database into Harbor, setting `TRIVY_DB_REPOSITORY`.
+Recommended Harbor project settings:
 - immutable tags
 - **Prevent vulnerable images from running**, using Harbor's scanner, as a
   second gate on images already published
@@ -373,7 +385,8 @@ refuses a client secret outright.
 3. `app.env` names the files as the API sees them:
    `ENTRA_CLIENT_CERT_FILE=/run/secrets/eris/entra-client.crt` and
    `ENTRA_CLIENT_KEY_FILE=/run/secrets/eris/entra-client.key`. `eris-pod.sh`
-   mounts `deploy/podman/secrets` read-only into the API container only. It
+   imports regular files from `deploy/podman/secrets` into Podman's secret store
+   and maps them read-only into the API only, UID/GID 10001 and mode 0400. It
    refuses to start if the folder or its files are readable by others.
 4. `bash deploy/podman/eris-pod.sh cert-check` prints the certificate's
    thumbprint (compare it with the one Entra lists) and its expiry. It fails
@@ -527,37 +540,27 @@ unknown, unassigned, disabled), MFA prompts, upload and signed download,
 restart/reboot, restore and rollback remain manual tests.
 
 Monitor free space (especially terrain packages), DB health, S3 bucket checks,
-worker logs, certificate and Entra-secret expiration. SMTP and Expo push are
+worker logs, certificate and signing-asset expiration. SMTP and APNs are
 optional; enable only after Caltrans supplies approved relays/credentials.
 
 ## Mobile sign-in (Entra)
 
-**The Caltrans iOS app will be native Swift** (decided 2026-10-28), built on the Caltrans Mac
-mini, signed with Caltrans's Apple Developer Enterprise Program account, and distributed as an
-Intune line-of-business app through Company Portal. There is no Android app. Push goes
-through APNs (`APNS_*` settings; the `.p8` key goes in `deploy/podman/secrets`; outbound
-`api.push.apple.com:443`). It signs in with **MSAL for iOS
-through Microsoft Authenticator** against the same server endpoint. The
-[iOS app specification](../development/ios.md) is the build contract, and records an iPhone check
-indicating that Caltrans relies on device compliance, not app protection. The Expo app
-described below is the reference implementation until the Swift app reaches parity.
+The supported iPhone app is native Swift in `ios/`, with MSAL sign-in through
+Microsoft Authenticator and APNs notifications. Expo is retired; Android is not
+in the current deliverable. Agency signing, bundle/team IDs, production URL,
+privacy approval and enrolled-device validation remain required. The existing
+Apple membership type is not confirmed: choose an approved custom-app or
+Enterprise distribution path, then configure Intune/Company Portal accordingly.
+See [native build and distribution](../../ios/README.md) and the
+[licensing decision](../caltrans/licensing-bill-of-materials.md).
 
-
-The mobile app signs in through Caltrans Entra following
-[OAuth 2.0 for Native Apps (RFC 8252)](https://www.rfc-editor.org/rfc/rfc8252):
-1. It opens Entra in the system browser (iOS `ASWebAuthenticationSession`,
-   Android Custom Tabs), which shares the device's Entra sign-in, so MFA and
-   Conditional Access apply as they do on the web.
-2. It uses authorization code + PKCE as a separate **public** client. There is
-   no secret in the app.
-3. It requests an access token for the ERIS API scope and sends it once to
-   `POST /api/auth/entra/native`.
-4. ERIS verifies the token: signature, issuer, tenant, audience, the
-   `access_as_user` scope, and that it was issued **to the ERIS mobile app**
-   (`azp`). ERIS then matches the prelinked `(tenant, object ID)` exactly as
-   for the web.
-5. ERIS returns its own revocable bearer session. The Entra token is
-   discarded, and browsers are refused at this endpoint.
+MSAL handles the public-client authorization flow/PKCE and broker interaction;
+there is no app client secret. It requests the ERIS API scope and sends the
+result once to `POST /api/auth/entra/native`. ERIS validates signature, issuer,
+tenant, audience, `access_as_user` and the mobile application's `azp`, then
+matches the prelinked `(tenant, object ID)` and returns a revocable ERIS bearer
+session. Browsers cannot use this token-exchange route. The phone stores its
+ERIS session in the device-only Keychain and never places tokens in URLs.
 
 Mobile sessions follow the same rules as the web, except that they have no
 idle timeout (12 hours absolute). Signing out on the phone ends that device's
@@ -570,10 +573,11 @@ Entra setup (IT):
    `access_as_user`, admin consent only. In its **Manifest**, set
    `"requestedAccessTokenVersion": 2`; ERIS accepts only v2.0 tokens.
 2. Create a second app registration, **ERIS Mobile**, single tenant. Under
-   **Authentication → Add a platform → Mobile and desktop applications**, add
-   the redirect URI `com.juancampos.eris.mobile://auth/entra` (the app's bundle
-   identifier; a Caltrans build with another identifier changes both the URI
-   and `EXPO_PUBLIC_ENTRA_REDIRECT_URI`). Add no secret or certificate.
+   **Authentication → Add a platform → iOS / macOS**, register the production
+   bundle ID `gov.ca.dot.eris` (or the approved staging bundle ID). Use MSAL's
+   generated redirect `msauth.<bundle-id>://auth`, matching `Info.plist` and the
+   broker configuration in the [iOS specification](../development/ios.md).
+   Add no secret or certificate.
 3. Under **API permissions**, add the delegated permission
    `access_as_user` on the ERIS web API and grant admin consent.
 4. Apply the same assignment and Conditional Access policy to ERIS Mobile.
@@ -581,32 +585,20 @@ Entra setup (IT):
    `ENTRA_API_SCOPE=api://<web-client-id>/access_as_user`. The app reads
    these public values from `/api/auth/config`, so no app rebuild is needed.
 
-**Intune.** What the app needs depends on the Conditional Access grant that
-Caltrans applies to iOS and Android; Caltrans's Intune admin must confirm it:
+**Intune and device acceptance.** The identity/Intune team must confirm the
+actual Conditional Access grant. For compliant-device policy, test MSAL with
+Authenticator and the Enterprise SSO plug-in, allowing each approved ERIS bundle
+ID. If app-protection/MAM policy is required, the current app needs a separately
+scoped Intune App SDK integration and acceptance; Company Portal enrollment
+alone does not implement those controls.
 
-- **Require a compliant device** (devices enrolled through Company Portal). The
-  system-browser sign-in can pass device state through the **Microsoft
-  Enterprise SSO plug-in for Apple devices** if Intune's SSO extension profile
-  allows the ERIS app's bundle identifier (or allows all apps). This needs no
-  ERIS code change, but it must be tested on an enrolled device.
-- **Require app protection policy** (Intune MAM: copy/paste, save-as and
-  data-transfer rules inside the app). The app must integrate the **Intune App
-  SDK** and sign in with **MSAL through the Microsoft Authenticator broker**,
-  instead of the system browser. That is native iOS/Android work (an Expo
-  native module or config plugin), built and tested on macOS with enrolled
-  devices. The server side is already compatible: MSAL returns the same kind of
-  access token for the ERIS API scope, issued to the ERIS Mobile client, which
-  `/auth/entra/native` accepts unchanged.
-- Distribution as a line-of-business app through Intune (or Apple Business
-  Manager) is independent of both and needs a signed release build.
-
-The custom redirect scheme needs a development or store build of the app (not
-Expo Go). Tested so far: the PKCE and URL logic (unit tests) and the server
-exchange (unit tests with signed tokens). A real device against a Caltrans
-tenant has **not** been tested. Mobile attachment previews use presigned
-storage URLs, falling back to the API with an `Authorization` header; there is
-never a token in a URL. Confirm phone reachability to both ERIS and S3 HTTPS
-URLs, and decide whether approved Expo push service traffic is allowed.
+App distribution is a separate choice: approved custom-app delivery or, only
+with the required Enterprise membership, an in-house IPA. A signed device build
+is required; unsigned simulator CI does not prove installation or broker policy.
+Exercise sign-in/token renewal/revocation, push, offline maps and queued changes
+on enrolled phones. Both agency HTTPS web/API and file URLs must be reachable.
+Before removing the personal app, sync and reconcile its outbox: a new bundle
+ID does not inherit unsent drafts/photos. See the [cutover procedure](../handover/server-transfer.md#final-cutover-and-rollback).
 
 ## Protocol references
 

@@ -1,27 +1,32 @@
-# Offline 3D scene-package generation worker image.
-# Same app code as the API, plus the geospatial stack (rasterio/GDAL via wheels)
-# for decoding USGS 3DEP DEM GeoTIFFs into the canonical analytical height grid.
-# The worker also exports Esri Terrain 3D CompactV2/LERC tiles and embeds them in
-# the ERIS package as the preferred native visualization surface.
-FROM python:3.12-slim
-
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
-
+# Rasterio has no musllinux wheel: build its pinned source against GDAL in
+# a disposable compiler stage, then retain only runtime GDAL and Python wheels.
+# Keep apk and Python package metadata intact for vulnerability/SBOM scans.
+FROM python:3.12-alpine@sha256:c5ba3deef00c7758561a0f03c26f44f10589263d40e732b8748e0d1f38f6dd89 AS wheels
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+WORKDIR /build
+ENV GDAL_CONFIG=/usr/bin/gdal-config
+ARG GDAL_PACKAGE_VERSION=3.13.3-r0
+RUN apk upgrade --no-cache && apk add --no-cache build-base "gdal-dev=${GDAL_PACKAGE_VERSION}"
+COPY requirements.txt requirements-worker.txt constraints.txt ./
+RUN pip install --no-cache-dir --upgrade pip==26.3 setuptools==84.2.1 && pip wheel --no-cache-dir --no-binary=rasterio --wheel-dir /wheels -r requirements-worker.txt
+FROM python:3.12-alpine@sha256:c5ba3deef00c7758561a0f03c26f44f10589263d40e732b8748e0d1f38f6dd89
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
-
-# The rasterio manylinux wheel bundles GDAL but still dynamically links a few
-# base system libraries that python:*-slim strips (e.g. libexpat for GDAL's XML
-# drivers). Install just those runtime libs so `import rasterio` works.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends libexpat1 \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY requirements.txt requirements-worker.txt ./
-RUN pip install --no-cache-dir -r requirements-worker.txt
-
+ENV GDAL_DATA=/usr/share/gdal PROJ_DATA=/usr/share/proj
+ARG GDAL_PACKAGE_VERSION=3.13.3-r0
+RUN apk upgrade --no-cache && apk add --no-cache "gdal=${GDAL_PACKAGE_VERSION}"
+COPY --from=wheels /wheels /wheels
+COPY requirements.txt requirements-worker.txt constraints.txt ./
+# The runtime needs the installed libraries, not pip and its vendored installer
+# code. Preserve application dist-info metadata for complete SBOM/package scans.
+RUN pip install --no-cache-dir --upgrade pip==26.3 setuptools==84.2.1 \
+    && pip install --no-cache-dir --no-index --find-links=/wheels -r requirements-worker.txt \
+    && python -m pip check \
+    && python -m pip uninstall --yes pip \
+    && rm -rf /wheels
 COPY app ./app
 COPY alembic.ini .
 COPY migrations ./migrations
-
-CMD ["python", "-m", "app.worker.offline_scene_worker_esri"]
+RUN addgroup -g 10001 eris && adduser -D -H -u 10001 -G eris eris
+USER 10001:10001
+CMD ["python", "-m", "app.worker.offline_scene_worker"]

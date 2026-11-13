@@ -9,12 +9,11 @@ page explains the chain and how to work with it.
 
 ```mermaid
 flowchart LR
-    src["Reviewed source<br/>pull request + CI"] --> build["Jenkins builds<br/>api, worker, web"]
+    src["Reviewed source<br/>pull request + CI"] --> build["Jenkins builds<br/>all five images"]
     build --> tests["Security tests<br/>inside the built API image"]
     tests --> scan["Trivy<br/>SBOM (CycloneDX)<br/>+ vulnerability and secret gate"]
-    mirrors["IT-approved mirrors<br/>MariaDB, SeaweedFS"] --> scan2["Same gate"]
+    mirrors["Optional approved mirrors<br/>MariaDB, SeaweedFS"] --> scan
     scan --> push["Push to Harbor<br/>record the digest"]
-    scan2 --> sign
     push --> sign["cosign sign the digest<br/>+ attest the SBOM"]
     sign --> verify["cosign verify<br/>(same job)"]
     verify --> env["release-images.env<br/>five digests"]
@@ -23,17 +22,38 @@ flowchart LR
 
 | Step | Where | Fails the release when |
 | --- | --- | --- |
-| Pull request checks | GitHub Actions `ci.yml`, `docs.yml` | Any test, type check, migration or docs check fails, or `dependency-audit` finds a known vulnerability (`pip-audit`, `npm audit --audit-level=high`) |
+| Pull request checks | GitHub Actions `ci.yml`, `docs.yml` | Any test, type check, migration or docs check fails, or `dependency-audit` finds a known vulnerability (`pip-audit`, `npm audit --audit-level=low`) |
 | Validate | Stage *Validate* | A shell script has a syntax error, or the deployment and release-gate script tests (stub Podman) fail |
 | Build | Stage *Build* | An image fails to build or the API code fails to compile |
 | Security tests | Stage *Backend security checks* | Any session, Entra, route-guard, handover or push test fails inside the image that will ship |
-| SBOM and gate | Stage *SBOM and vulnerability gate*, `deploy/ci/release-gate.sh scan` | A HIGH or CRITICAL vulnerability **with a fix available**, or an embedded secret, not listed in `.trivyignore` |
-| Publish, sign, attest | Stage *Publish, sign and attest* | Push, signing or the verification of the signature fails |
-| Staging deploy | `deploy-hook.sh` → `eris-pod.sh release` | Signature policy rejects a pull; migration, health or verification fails (automatic rollback) |
+| SBOM and gate | Stage *Scan all images, publish, sign and attest*, `deploy/ci/release-gate.sh scan` | Any known vulnerability at **all severities, including findings without a published fix**, or an embedded secret, not listed in `.trivyignore` |
+| Publish, sign, attest | Same stage, after all five scans | Push, signing or the verification of the signature fails |
+| Staging deploy | `deploy-hook.sh` â†’ `eris-pod.sh release` | Signature policy rejects a pull; migration, health or verification fails (automatic rollback) |
 | Production deploy | Same, after a named approver in Jenkins | Same |
 
 Nothing is pushed to Harbor before the gate passes, so a failed scan publishes
 nothing.
+
+The publisher first audits the selected signing tool before mounting signing
+credentials, then scans all five runtime images. Jenkins builds the patched
+Cosign source recipe by default; an approved mirror override receives the same
+all-severity gate. Direct helper use requires an explicit `COSIGN_IMAGE`.
+The upstream tool baseline is retained separately as investigation evidence and
+never receives a signing key. The custom candidate preserves upstream identity,
+actual Go build/module metadata and licenses for future advisory matching.
+
+Cosign 3 uses explicit legacy signature/attestation options for Podman's
+`sigstoreSigned` attachment format. Do not remove those options without proving
+host-policy compatibility. The signer runs with the rootless account's UID/GID,
+read-only credentials/root filesystem and disposable temporary state; private
+mode-600 files are not made readable to other users. For an agency registry CA,
+set `COSIGN_REGISTRY_CA_FILE` and install trust for host Podman as well; do not
+disable TLS verification. The ephemeral TLS-registry CI test proves actual
+signing/attestation and correct/wrong/unsigned-image pull decisions.
+
+The separate [GitHub candidate workflow](../handover/image-package.md) builds,
+scans and rehearses the five-image package without accessing a live host or
+publishing a Harbor release. Agency credentials and acceptance are still needed.
 
 ## What gets produced per release
 
@@ -41,7 +61,7 @@ nothing.
 | --- | --- |
 | `release/sbom/<image>.cdx.json` | CycloneDX SBOM of every package in the image (five images) |
 | `release/sbom/<image>.vulns.json` | Trivy findings at the gate severity, after exceptions |
-| `release/<image>.ref` | `harbor…/eris/<image>@sha256:…` |
+| `release/<image>.ref` | `harborâ€¦/eris/<image>@sha256:â€¦` |
 | `release/cosign.pub` | The public key the hosts trust |
 | `release/release-images.env` | The five digests and `ERIS_REQUIRE_DIGESTS=true`: the release file the hosts consume |
 
@@ -79,7 +99,7 @@ input (size-limited) and runs `eris-pod.sh release` with it.
 
 ## Vulnerability exceptions
 
-The gate fails on fixable HIGH and CRITICAL findings. When a fix is not yet
+The gate defaults to all severities, including findings without a published fix. When a fix is not yet
 possible, an exception may be added to [`.trivyignore`](../../.trivyignore):
 
 1. Confirm the finding is real for ERIS (is the vulnerable code reachable?).
@@ -94,21 +114,21 @@ possible, an exception may be added to [`.trivyignore`](../../.trivyignore):
    CVE-0000-00000
    ```
 4. The change goes through a pull request like any code.
-5. At every release, remove expired entries. An expired entry is a finding.
+5. At every release, remove expired entries. Remove an expired entry before running the gate; expiry comments require release review and are not automatically interpreted by the plain ignore-file format.
 
-Unfixed vulnerabilities (no fix published) do not fail the gate but appear in
-the `vulns.json` report; review them monthly
+Unfixed vulnerabilities also fail the default gate. Any accepted exception needs
+explicit security approval and an expiry; review findings and exceptions at every release and monthly
 ([maintenance calendar](../handover/README.md#recurring-maintenance-calendar)).
 
 ## Dependencies
 
 | Ecosystem | Manifest | Lock | How to update |
 | --- | --- | --- | --- |
-| Python (API, worker) | `backend/requirements.txt` | Pinned versions in the file | [Dependency updates](../development/conventions.md#dependency-updates) |
+| Python (API, worker) | `backend/requirements.txt` | `backend/constraints.txt` pins the API/worker resolution; built-image SBOM records it | [Dependency updates](../development/conventions.md#dependency-updates) |
 | JavaScript (web) | `web/package.json` | `web/package-lock.json` | `npm ci` in CI; update with `npm install <pkg>@<version>` |
-| Swift (iPhone) | `ios/` Swift Package Manager (branch `claude/ios-swift-app`) | `Package.resolved` | Xcode → Update to latest package versions; MSAL from Microsoft only |
-| Base images | `backend/Dockerfile`, `backend/Dockerfile.worker`, `web/Dockerfile` | Pinned tags; production pins digests | Rebuild monthly to pick up OS patches |
-| Third-party runtime images | MariaDB, SeaweedFS | Mirrored into Harbor by IT | IT mirrors a new version; Jenkins scans and signs it |
+| Swift (iPhone) | `ios/` Swift packages pinned in `project.yml` on main | `Package.resolved` | Xcode â†’ Update to latest package versions; MSAL from Microsoft only |
+| Base images | `backend/Dockerfile`, `backend/Dockerfile.worker`, `web/Dockerfile` | Pinned runtime base digests; production pins release digests | Rebuild monthly to pick up OS patches |
+| Third-party runtime images | MariaDB, SeaweedFS | Mirrored into Harbor by IT | Repository recipes build patched candidates by default; approved mirror overrides receive the same gate |
 | Pipeline tools | Trivy, cosign | Pinned in `release-gate.sh` | Mirror into Harbor, update `TRIVY_IMAGE` / `COSIGN_IMAGE` |
 
 ## Keys

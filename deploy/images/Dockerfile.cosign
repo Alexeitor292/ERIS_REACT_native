@@ -1,0 +1,42 @@
+# Agency signing tool, separate from the five deployed application images.
+# Rebuild supported Cosign3 with a patched Go toolchain/dependency graph. Keep
+# package/build metadata and licenses available to the image/SBOM scanner.
+FROM golang:1.27.4-alpine3.24@sha256:0a5f7fe796599ff487605987432e7619ae45beeb2fba4c2ce0b907879932aebf AS build
+ENV GOTOOLCHAIN=local CGO_ENABLED=0
+RUN apk upgrade --no-cache && apk add --no-cache ca-certificates curl patch
+WORKDIR /src
+# Signed upstream v3.1.4 tag resolves to this exact commit; verify archive bytes.
+ARG COSIGN_COMMIT=0e48502cf5ef34e2e60bbd3617aa19945712f705
+ARG COSIGN_SOURCE_SHA256=9d57a78b666ace26c7184b14ba1b1e7f5177df2c5ca1c24e4ea12e3ca847922b
+RUN curl --fail --location --retry 3 "https://codeload.github.com/sigstore/cosign/tar.gz/$COSIGN_COMMIT" -o /tmp/cosign.tar.gz \
+    && echo "$COSIGN_SOURCE_SHA256  /tmp/cosign.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/cosign.tar.gz --strip-components=1 -C /src
+COPY deploy/images/cosign-no-ambient-acr.patch /tmp/cosign-no-ambient-acr.patch
+# GO-2026-6225 has no upstream fix. Remove the actual optional ambient ACR
+# helper integration; ERIS uses explicit Harbor credentials and a file signing
+# key. This removes executable credential-disclosure code, not its metadata.
+RUN patch --fuzz=0 -p1 < /tmp/cosign-no-ambient-acr.patch \
+    && go mod edit -droprequire=github.com/chrismellard/docker-credential-acr-env \
+    && go get github.com/go-chi/chi/v5@v5.4.0 github.com/klauspost/compress@v1.20.2 \
+        golang.org/x/crypto@v0.59.0 golang.org/x/net@v0.62.0 \
+        go.opentelemetry.io/otel@v1.47.0 go.opentelemetry.io/otel/trace@v1.47.0 \
+        go.opentelemetry.io/otel/metric@v1.47.0 go.opentelemetry.io/otel/sdk@v1.47.0 \
+    && go mod tidy \
+    && go build -p 2 -trimpath \
+        -ldflags "-s -w -X sigs.k8s.io/release-utils/version.gitVersion=v3.1.4-eris.1 -X sigs.k8s.io/release-utils/version.gitCommit=$COSIGN_COMMIT -X sigs.k8s.io/release-utils/version.gitTreeState=dirty" \
+        -o /out/cosign ./cmd/cosign \
+    && go version -m /out/cosign
+
+FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
+RUN apk upgrade --no-cache && apk add --no-cache ca-certificates \
+    && addgroup -g 65532 cosign && adduser -D -H -u 65532 -G cosign cosign
+COPY --from=build /out/cosign /usr/local/bin/cosign
+COPY --from=build /src/LICENSE /usr/share/licenses/cosign/LICENSE
+COPY --from=build /src/go.mod /src/go.sum /usr/share/cosign/
+# A local go build records its main module as (devel). Declare the exact upstream
+# identity plus modification properties so future Cosign advisories still match.
+COPY deploy/images/cosign-source.cdx.json /usr/share/cosign/source.cdx.json
+USER 65532:65532
+WORKDIR /tmp
+ENTRYPOINT ["/usr/local/bin/cosign"]
+CMD ["version"]

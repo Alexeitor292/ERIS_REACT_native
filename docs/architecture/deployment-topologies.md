@@ -36,7 +36,7 @@ flowchart LR
         subgraph compose["Docker Compose (deploy/compose)"]
             mdb[("MariaDB<br/>:3306")]
             sfs[("SeaweedFS S3<br/>:9800")]
-            adm["Adminer<br/>:8081"]
+            adm["Adminer (optional)<br/>:8081"]
         end
         wk["Optional: terrain worker<br/>python -m app.worker.offline_scene_worker"]
     end
@@ -64,7 +64,7 @@ flowchart TB
     end
     subgraph host["Linux host: rootless Podman, service account"]
         subgraph pod["pod 'eris'"]
-            web["eris-web :80"]
+            web["eris-web :8080"]
             api["eris-api :8000"]
             worker["eris-worker"]
             db[("eris-mariadb :3306")]
@@ -93,7 +93,7 @@ flowchart TB
 | Port | Where | Exposed to | Purpose |
 | --- | --- | --- | --- |
 | 443 | TLS gateway | Staff network | `eris.<domain>` (web + `/api`) and `eris-files.<domain>` (signed files) |
-| 8080 | Host (loopback or private IP) | The gateway only | Pod port 80: nginx, SPA and `/api` |
+| 8080 | Host (loopback or private IP) | The gateway only | Pod port 8080: nginx, SPA and `/api` |
 | 9800 | Host (loopback or private IP) | The gateway only | Pod port 8333: SeaweedFS S3 |
 | 8000, 3306, 8333, 9333, 8888, 23646 | Inside the pod | Nothing | API, MariaDB, SeaweedFS internals (`verify-rehearsal.sh` fails if published) |
 

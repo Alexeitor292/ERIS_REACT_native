@@ -14,13 +14,13 @@ flowchart LR
     pr --> ci["CI green"]
     ci --> review["Review by a second person"]
     review --> merge["Squash merge to main"]
-    merge --> jenkins["Jenkins release<br/>staging → approval → production"]
+    merge --> jenkins["Jenkins release<br/>staging â†’ approval â†’ production"]
 ```
 
 ## Branches and commits
 
 - `main` is always releasable. Never commit directly to it.
-- Branch names: `feature/…`, `fix/…`, `docs/…`, `chore/…` (short, lowercase,
+- Branch names: `feature/â€¦`, `fix/â€¦`, `docs/â€¦`, `chore/â€¦` (short, lowercase,
   hyphens).
 - Commit messages: an imperative summary under 72 characters ("Add incident
   notes", "Fix photo download session check"), a blank line, then *why* the
@@ -97,7 +97,7 @@ Writing rules:
 
 ## Dependency updates
 
-Monthly, and whenever the release gate reports a fixable vulnerability:
+Monthly, and whenever the release gate reports a known vulnerability:
 
 1. **Python:** in a fresh virtualenv, `pip install -r backend/requirements.txt`,
    then upgrade one package at a time (`pip install -U <pkg>`), run the tests,
@@ -129,3 +129,13 @@ without discussing it in the pull request.
   (`org.opencontainers.image.revision`), so any running container can be traced
   to its commit.
 - Record user-visible changes in the release request to the change board.
+
+Python transitive versions are constrained by `backend/constraints.txt`. Refresh
+it in a clean Linux Python 3.12 worker environment when updating requirements,
+then run pip-audit, backend tests and the built-image gate. Do not generate it
+from a personal environment containing unrelated tools.
+
+Python transitive versions are constrained by `backend/constraints.txt`. Refresh
+it in a clean Linux Python 3.12 worker environment when updating requirements,
+then run pip-audit, backend tests and the built-image gate. Do not generate it
+from a personal environment containing unrelated tools.

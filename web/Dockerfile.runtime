@@ -1,6 +1,17 @@
-FROM nginx:1.27-alpine
+FROM nginx:1.30.6-alpine@sha256:901e593c95dc85f5a729f5765516321366ef4ac401821431d408897e95287d0a
+# Match the source-build image's nonroot runtime without making its config or
+# application assets writable by the web process.
+RUN apk upgrade --no-cache \
+    && test "$(id -u nginx)" = 101 \
+    && test "$(id -g nginx)" = 101 \
+    && sed -ri '/^[[:space:]]*user[[:space:]]/d; s@^[[:space:]]*pid[[:space:]]+[^;]+;@pid /tmp/nginx.pid;@' /etc/nginx/nginx.conf \
+    && grep -q '^pid /tmp/nginx.pid;' /etc/nginx/nginx.conf \
+    && mkdir -p /var/cache/nginx /var/log/nginx \
+    && chown -R 101:101 /var/cache/nginx \
+    && chown 101:101 /var/log/nginx
 
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY dist/ /usr/share/nginx/html/
 
-EXPOSE 80
+USER 101:101
+EXPOSE 8080

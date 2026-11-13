@@ -1,0 +1,13 @@
+# Candidate agency mirror. Do not replace an existing storage deployment until
+# private-bucket, attachment and matched backup/restore acceptance passes.
+FROM golang:1.27.4-alpine@sha256:0a5f7fe796599ff487605987432e7619ae45beeb2fba4c2ce0b907879932aebf AS build
+ENV CGO_ENABLED=0 GOTOOLCHAIN=local
+WORKDIR /src
+ADD --checksum=sha256:ab943b1b82f969fd3cb8e81f2c0dfc5b1b2868cd7891c59b9b671fb6825bc220 https://github.com/seaweedfs/seaweedfs/archive/refs/tags/4.53.tar.gz /tmp/source.tgz
+RUN tar xzf /tmp/source.tgz --strip-components=1 -C /src \
+    && go get golang.org/x/net@v0.62.0 golang.org/x/crypto@v0.59.0 \
+    && go build -trimpath -o /weed ./weed
+
+FROM chrislusf/seaweedfs:4.53@sha256:ccad23e18639c8b98cee17e7100b95830a06077b56d8e5b006d6dcf8ec5e94a0
+RUN apk upgrade --no-cache
+COPY --from=build /weed /usr/bin/weed

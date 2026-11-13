@@ -15,11 +15,11 @@ TENANT=11111111-1111-4111-8111-111111111111
 passed=0
 
 cat > "$work/deploy/images.env" <<'EOF'
-ERIS_API_IMAGE=harbor.test/eris/api@sha256:aaaa
-ERIS_WORKER_IMAGE=harbor.test/eris/worker@sha256:bbbb
-ERIS_WEB_IMAGE=harbor.test/eris/web@sha256:cccc
-ERIS_DB_IMAGE=harbor.test/eris/mariadb@sha256:dddd
-ERIS_STORAGE_IMAGE=harbor.test/eris/seaweedfs@sha256:eeee
+ERIS_API_IMAGE=harbor.test/eris/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ERIS_WORKER_IMAGE=harbor.test/eris/worker@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+ERIS_WEB_IMAGE=harbor.test/eris/web@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+ERIS_DB_IMAGE=harbor.test/eris/mariadb@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+ERIS_STORAGE_IMAGE=harbor.test/eris/seaweedfs@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 EOF
 printf 'S3_BUCKET=eris-uploads\n' > "$work/deploy/app.env"
 chmod 600 "$work/deploy/app.env"
@@ -28,12 +28,15 @@ cat > "$work/bin/podman" <<'STUB'
 #!/usr/bin/env bash
 case "$*" in
   "inspect --format {{.State.Running}} "*) echo true ;;
-  "inspect --format {{.ImageName}} eris-api") echo "${API_IMAGE:-harbor.test/eris/api@sha256:aaaa}" ;;
-  "inspect --format {{.ImageName}} eris-worker") echo harbor.test/eris/worker@sha256:bbbb ;;
-  "inspect --format {{.ImageName}} eris-web") echo harbor.test/eris/web@sha256:cccc ;;
-  "inspect --format {{.ImageName}} eris-mariadb") echo harbor.test/eris/mariadb@sha256:dddd ;;
-  "inspect --format {{.ImageName}} eris-seaweedfs") echo harbor.test/eris/seaweedfs@sha256:eeee ;;
-  "pod inspect "*) echo "{\"80/tcp\":[{\"HostIp\":\"127.0.0.1\",\"HostPort\":\"8080\"}],\"8333/tcp\":[{\"HostIp\":\"127.0.0.1\",\"HostPort\":\"9800\"}]${EXTRA_PORT:-}}" ;;
+  "inspect --format {{.ImageName}} eris-api") echo "${API_IMAGE:-harbor.test/eris/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}" ;;
+  "inspect --format {{.ImageName}} eris-worker") echo harbor.test/eris/worker@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb ;;
+  "inspect --format {{.ImageName}} eris-web") echo harbor.test/eris/web@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc ;;
+  "inspect --format {{.ImageName}} eris-mariadb") echo "${DB_IMAGE:-harbor.test/eris/mariadb@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd}" ;;
+  "inspect --format {{.ImageName}} eris-seaweedfs") echo harbor.test/eris/seaweedfs@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee ;;
+  "pod inspect "*) echo "{\"8080/tcp\":[{\"HostIp\":\"${HOST_IP:-127.0.0.1}\",\"HostPort\":\"8080\"}],\"8333/tcp\":[{\"HostIp\":\"${HOST_IP:-127.0.0.1}\",\"HostPort\":\"9800\"}]${EXTRA_PORT:-}}" ;;
+  "exec eris-api python -m app.tools.handover_status") exit "${HANDOVER_EXIT:-0}" ;;
+  *"ERIS_WEB_RUNTIME_POSTURE"*) exit "${WEB_POSTURE_EXIT:-0}" ;;
+  *"ERIS_RUNTIME_POSTURE"*) echo 'ENV must be prod'; exit "${POSTURE_EXIT:-0}" ;;
   "exec eris-api python -m app.tools.entra_credential_check") echo "Entra certificate credential: OK"; exit "${CERT_EXIT:-0}" ;;
   "exec eris-api "*) exit 0 ;;
   *) echo "unexpected podman $*" >&2; exit 99 ;;
@@ -57,7 +60,7 @@ code=200 body="ok" redirect=""
 case "$url" in
   */api/docs|*/api/openapi.json) code="${DOCS_CODE:-404}" ;;
   */api/auth/me) code="${ME_CODE:-401}" ;;
-  */api/auth/config) body="{\"local_login_enabled\":${LOCAL_LOGIN:-false},\"entra_enabled\":true,\"session_minutes\":120}" ;;
+  */api/auth/config) body="{\"local_login_enabled\":${LOCAL_LOGIN:-false},\"entra_enabled\":${ENTRA_ENABLED:-true},\"session_minutes\":120}" ;;
   */api/auth/entra/start) code=303; redirect="${ENTRA_REDIRECT}" ;;
   */eris-uploads/) code="${BUCKET_CODE:-403}" ;;
 esac
@@ -79,11 +82,21 @@ if [[ "$(uname -s)" != Linux ]]; then
 echo 600
 ' > "$work/bin/stat"
   chmod +x "$work/bin/stat"
+  # Windows may expose a python3 Store alias even when real Python is installed.
+  printf '#!/usr/bin/env bash\nexec python "$@"\n' > "$work/bin/python3"
+  chmod +x "$work/bin/python3"
 fi
 chmod +x "$work/bin/podman" "$work/bin/curl"
+export PATH="$work/bin:$PATH"
 # The service account's signature policy (deploy/podman/signature-policy).
 mkdir -p "$work/home/.config/containers"
-printf '{"transports":{"docker":{"harbor.test/eris":[{"type":"sigstoreSigned","keyPath":"/k.pub"}]}}}'   > "$work/home/.config/containers/policy.json"
+printf 'public-key' > "$work/k.pub"
+python3 - "$work/home/.config/containers/policy.json" "$work/k.pub" <<'PY'
+import json, sys, subprocess, os
+paths = sys.argv[1:]
+if os.name == 'nt': paths = [subprocess.check_output(['cygpath', '-w', p], text=True).strip() for p in paths]
+with open(paths[0], 'w') as out: json.dump({'default': [{'type': 'reject'}], 'transports': {'docker': {'harbor.test/eris': [{'type': 'sigstoreSigned', 'keyPath': paths[1], 'signedIdentity': {'type': 'matchRepository'}}]}}}, out)
+PY
 export HOME="$work/home" XDG_CONFIG_HOME="$work/home/.config"
 export PATH="$work/bin:$PATH"
 callback="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$WEB/api/auth/entra/callback" 2>/dev/null || true)"
@@ -107,22 +120,56 @@ expect_fail_line() {
 expect_pass "a handed-over deployment passes"
 check "reports password sign-in disabled" -- grep -q "^PASS password sign-in is disabled" "$work/out"
 ERIS_VERIFY_PROFILE=production expect_pass "a pinned, Entra-only, handed-over deployment passes the production profile"
+cp "$work/home/.config/containers/policy.json" "$work/policy.original"
+python3 - "$work/home/.config/containers/policy.json" <<'PY'
+import json,sys
+path=sys.argv[1]; policy=json.load(open(path)); policy['transports']['docker']['harbor.test/eris/api']=[{'type':'insecureAcceptAnything'}]
+with open(path,'w') as out: json.dump(policy,out)
+PY
+ERIS_VERIFY_PROFILE=production expect_fail_line "an insecure image override cannot hide behind a strict project policy" "no Podman signature policy.*harbor.test/eris/api"
+python3 - "$work/home/.config/containers/policy.json" <<'PY'
+import json,sys
+path=sys.argv[1]; policy=json.load(open(path)); scopes=policy['transports']['docker']; scopes['harbor.test/eris/api@sha256:'+'a'*64]=scopes['harbor.test/eris']
+with open(path,'w') as out: json.dump(policy,out)
+PY
+ERIS_VERIFY_PROFILE=production expect_pass "an exact image signature rule takes precedence over a repository override"
+cp "$work/policy.original" "$work/home/.config/containers/policy.json"
+sed -i 's|^ERIS_DB_IMAGE=harbor.test/eris/|ERIS_DB_IMAGE=harbor.test/unsigned/|' "$work/deploy/images.env"
+DB_IMAGE=harbor.test/unsigned/mariadb@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd ERIS_VERIFY_PROFILE=production \
+  expect_fail_line "production requires signatures for every image repository prefix" "no Podman signature policy.*harbor.test/unsigned"
+sed -i 's|^ERIS_DB_IMAGE=harbor.test/unsigned/|ERIS_DB_IMAGE=harbor.test/eris/|' "$work/deploy/images.env"
+ERIS_VERIFY_PROFILE=prod expect_fail_line "an unknown verification profile fails closed" "ERIS_VERIFY_PROFILE must be"
+ERIS_VERIFY_PROFILE=production WEB=http://eris.example.test expect_fail_line "production refuses a plain-HTTP web URL" "is not HTTPS"
+ERIS_VERIFY_PROFILE=production FILES= expect_fail_line "production requires the file hostname" "S3 hostname not given"
+ERIS_VERIFY_PROFILE=production FILES=http://files.example.test expect_fail_line "production refuses plain-HTTP file URLs" "is not HTTPS"
+ERIS_VERIFY_PROFILE=production ENTRA_ENABLED=false expect_fail_line "production requires Entra sign-in" "Entra sign-in is disabled"
+ERIS_VERIFY_PROFILE=production HANDOVER_EXIT=1 expect_fail_line "production requires administrator handover" "administrator handover check failed"
+ERIS_VERIFY_PROFILE=production POSTURE_EXIT=1 expect_fail_line "production checks effective settings and process security" "runtime posture failed"
+ERIS_VERIFY_PROFILE=production WEB_POSTURE_EXIT=1 expect_fail_line "production checks the effective nonroot nginx posture" "eris-web runtime posture failed"
 LOCAL_LOGIN=true expect_pass "password sign-in left on is a warning, not a failure"
 check "warns that password sign-in is still on" -- grep -q "^WARN password sign-in is enabled" "$work/out"
-EXTRA_PORT=',"3306/tcp":[{"HostIp":"0.0.0.0","HostPort":"3306"}]' expect_fail_line "a published MariaDB port fails" "internal port 3306"
+EXTRA_PORT=',"3306/tcp":[{"HostIp":"0.0.0.0","HostPort":"3306"}]' expect_fail_line "a published MariaDB port fails" "port 3306/tcp"
+EXTRA_PORT=',"9999/tcp":[{"HostIp":"0.0.0.0","HostPort":"9999"}]' expect_fail_line "an unexpected published port fails" "port 9999/tcp"
+HOST_IP=10.2.3.4 expect_pass "a private interface for a remote TLS gateway passes"
+HOST_IP=0.0.0.0 expect_fail_line "a wildcard host binding fails" "not a public or wildcard address"
+HOST_IP=8.8.8.8 expect_fail_line "a public host binding fails" "not a public or wildcard address"
 API_IMAGE=harbor.test/eris/api@sha256:old expect_fail_line "a container running a stale image fails" "eris-api runs"
 LOCAL_LOGIN=true ERIS_VERIFY_PROFILE=production expect_fail_line "production refuses password sign-in" "password sign-in is enabled"
 sed -i 's|^ERIS_API_IMAGE=.*|ERIS_API_IMAGE=harbor.test/eris/api:release-7|' "$work/deploy/images.env"
 API_IMAGE=harbor.test/eris/api:release-7 expect_pass "an unpinned image is only a warning in a rehearsal"
 API_IMAGE=harbor.test/eris/api:release-7 ERIS_VERIFY_PROFILE=production \
   expect_fail_line "production refuses unpinned images" "not pinned by digest"
-sed -i 's|^ERIS_API_IMAGE=.*|ERIS_API_IMAGE=harbor.test/eris/api@sha256:aaaa|' "$work/deploy/images.env"
+sed -i 's|^ERIS_API_IMAGE=.*|ERIS_API_IMAGE=harbor.test/eris/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|' "$work/deploy/images.env"
 ME_CODE=200 expect_fail_line "an anonymous request that is signed in fails" "anonymous /api/auth/me returned 200"
 CERT_EXIT=2 expect_fail_line "an unusable Entra certificate fails" "Entra credential unusable"
 CERT_EXIT=1 ERIS_VERIFY_PROFILE=production expect_fail_line "production refuses a certificate near expiry" "needs attention"
 mv "$work/home/.config/containers/policy.json" "$work/policy.saved"
 expect_pass "a missing signature policy is only a warning in a rehearsal"
 ERIS_VERIFY_PROFILE=production expect_fail_line "production requires a signature policy" "no Podman signature policy"
+mkdir -p "$work/ignored-xdg/containers"
+cp "$work/policy.saved" "$work/ignored-xdg/containers/policy.json"
+XDG_CONFIG_HOME="$work/ignored-xdg" ERIS_VERIFY_PROFILE=production \
+  expect_fail_line "an unused XDG policy cannot certify Podman's HOME policy" "no Podman signature policy"
 mv "$work/policy.saved" "$work/home/.config/containers/policy.json"
 DOCS_CODE=200 expect_fail_line "public API docs fail" "/api/docs returned 200"
 BUCKET_CODE=200 expect_fail_line "a publicly listable bucket fails" "bucket must be private"

@@ -40,7 +40,7 @@ final class MapsLicensingTests: XCTestCase {
     }
 
     func testALicenseTheSDKRefusesOrThatExpiredIsReported() {
-        let plan = MapsLicensing.license("runtimelite,1000,rud0001,none,OLD100")
+        let plan = MapsLicensing.license("invalid-or-incompatible-license")
         XCTAssertEqual(plan.problem(.invalid), "Maps aren't licensed: the ArcGIS license from ERIS isn't one for this app (it needs an ArcGIS Maps SDK 200.x license). Tell the ERIS administrator.")
         XCTAssertEqual(plan.problem(nil), plan.problem(.invalid), "a string the SDK cannot even read")
         XCTAssertEqual(plan.problem(.expired), "Maps aren't licensed: the ArcGIS license from ERIS has expired. Tell the ERIS administrator.")

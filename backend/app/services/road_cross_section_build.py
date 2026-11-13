@@ -9,8 +9,8 @@ same median classification, same divided-road shoulder inference, same source-de
 (ROAD_INVENTORY / FORM_FIELDS / DEFAULT), and the same undefined-vs-null key handling
 (the optional PM/route/county keys are OMITTED when absent; terrain/design_speed/adt/
 landmark are always present, null when absent). Locked to the mobile output by the
-shared fixture mobile/src/measurements/__fixtures__/roadCrossSectionParity.json (see
-tests/test_road_cross_section_build.py and the mobile parity test).
+recorded fixture tests/fixtures/roadCrossSectionParity.json (see
+tests/test_road_cross_section_build.py). The original mobile project is retired.
 
 Widths are in feet. Orientation is canonical UPSTATION (LT left, RT right).
 """

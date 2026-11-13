@@ -32,8 +32,7 @@ flowchart LR
 | --- | --- | --- |
 | [`backend/`](backend) | API, terrain worker, Alembic migrations, tests | Python 3.12, FastAPI, SQLAlchemy Core, MariaDB, SeaweedFS (S3) |
 | [`web/`](web) | Web app and its nginx configuration | React 19, TypeScript, Vite, Tailwind, ArcGIS Maps SDK for JavaScript |
-| `ios/` (branch `claude/ios-swift-app`) | Native iPhone app and the `ERISKit` package | Swift, SwiftUI, MSAL, APNs |
-| [`mobile/`](mobile) | Expo app, kept as the reference while the Swift app replaces it | Expo / React Native, ArcGIS Runtime for iOS |
+| [`ios/`](ios) | Native iPhone app and the `ERISKit` package | Swift, SwiftUI, MSAL, APNs |
 | [`database/`](database) | Init SQL for a new database; development mock accounts | MariaDB 11 |
 | [`deploy/podman/`](deploy/podman) | Caltrans production: one rootless Podman pod, release with automatic rollback, backups, verification | Podman, bash |
 | [`deploy/ci/`](deploy/ci) | Jenkins pipeline and the SBOM, vulnerability and signing gate | Jenkins, Trivy, cosign, Harbor |
@@ -45,9 +44,9 @@ flowchart LR
 ## Quick start (development)
 
 ```bash
-cd deploy/compose && cp .env.example .env && docker compose up -d   # MariaDB + SeaweedFS
+cd deploy/compose && cp .env.example .env && docker compose up -d --build   # Patched MariaDB + SeaweedFS
 # load database/dev/030_mock_accounts.sql, then from backend/:
-alembic stamp 0001_baseline && alembic upgrade head && ./run.sh     # API on :8000
+alembic stamp 0001_baseline && alembic upgrade head && bash run.sh     # API on :8000
 # from web/:
 npm ci && npm run dev                                              # http://localhost:5173
 ```
@@ -66,3 +65,10 @@ sign-in through Microsoft Entra ID only. Start with
 
 - How to make a change: [CONTRIBUTING.md](CONTRIBUTING.md).
 - How to report a vulnerability: [SECURITY.md](SECURITY.md).
+
+## November 2026 handoff
+
+ERIS owner: **Deh Jeng Jang**. Start with the [handoff guide](docs/handover/README.md),
+[remaining work](docs/handover/open-work.md), [licensing for 300 mobile installations](docs/caltrans/licensing-bill-of-materials.md),
+and [security review](docs/security/review-2026-11-13.md). Caltrans IT staging/production
+hosting and operational acceptance remain pending.

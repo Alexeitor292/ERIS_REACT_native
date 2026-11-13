@@ -1,0 +1,90 @@
+{
+  "date": "2026-11-13",
+  "scope": "Local Linux amd64 candidate builds, not agency-approved or deployed images",
+  "images": [
+    {
+      "name": "api",
+      "local_candidate": "eris-handoff-api:20261113",
+      "image_id": "sha256:e38f5e1a431998e2bf282a570af98d10b74bab443d80255cee627bfbfb5e416e",
+      "report": "api-final-image.json",
+      "report_sha256": "e018f4c579bebf8275aebb1bca49f063dabb1c9473b13a9bc2da714ccebf17a4",
+      "findings": {
+        "LOW": 66,
+        "HIGH": 48,
+        "MEDIUM": 90,
+        "UNKNOWN": 5
+      },
+      "secrets": 0
+    },
+    {
+      "name": "worker",
+      "local_candidate": "eris-handoff-worker:20261113",
+      "image_id": "sha256:1389bba7f810dc162a2bbf4221a319b1279d68e5f424259bc4395ae6ce59d300",
+      "report": "worker-final-image.json",
+      "report_sha256": "400a5b9759f7fe3f47650e6e6e43557c190b026005bd15b720784a235f3af5e0",
+      "findings": {
+        "LOW": 66,
+        "HIGH": 52,
+        "MEDIUM": 91,
+        "UNKNOWN": 6
+      },
+      "secrets": 0
+    },
+    {
+      "name": "web",
+      "local_candidate": "eris-handoff-web:20261113",
+      "image_id": "sha256:50030f770fa666e6a97606c2a9bd624ed52e47fd362f114f5a4e680eec4d5f01",
+      "report": "web-final-image.json",
+      "report_sha256": "65f91f088d1f2685c1a9a1aa105b1c937a64b6a9ad628895746fe1cbf52c00ad",
+      "findings": {},
+      "secrets": 0
+    },
+    {
+      "name": "mariadb",
+      "local_candidate": "eris-handoff-mariadb:20261113",
+      "image_id": "sha256:75e93aaf38f3250ea2a993a183a770f36f2841e0018515aa5e7992729b4846e3",
+      "report": "mariadb-final-image.json",
+      "report_sha256": "3255b7597ffab89b1cb87caf4671d76b7d43d9953c0b0da266a8dc88e7a5e13e",
+      "findings": {
+        "MEDIUM": 22,
+        "LOW": 7,
+        "UNKNOWN": 1
+      },
+      "secrets": 0
+    },
+    {
+      "name": "seaweedfs",
+      "local_candidate": "eris-handoff-seaweedfs:20261113",
+      "image_id": "sha256:8e3ca8aae5b0e6c9c0aa2a656d3aa66ae36855603ac17e5a393e5c4fe9a48274",
+      "report": "seaweedfs-final-image.json",
+      "report_sha256": "487cc17fd8e0a86d698e11eb9f9038f572678f344d72c114798a7a05a15ea9d1",
+      "findings": {},
+      "secrets": 0
+    }
+  ],
+  "tests": {
+    "backend_non_db_windows": 1380,
+    "backend_non_db_linux": 1380,
+    "backend_db_disposable_mariadb": 761,
+    "web": 303,
+    "pod_script_stub_checks": 64,
+    "verification_stub_checks": 18,
+    "release_gate_stub_checks": 19,
+    "docs_links": "0 broken in 73 Markdown files",
+    "api_reference": "up to date",
+    "schema_reference": "66 tables, fresh base-to-head and no-op second upgrade"
+  },
+  "runtime_smokes": [
+    "Patched MariaDB initializes schema/roles and restarts",
+    "Patched SeaweedFS provisions private uploads/offline buckets; signed object round-trip; anonymous listing refused",
+    "Built nginx plus API on shared namespace: healthz, same-origin api/health and api/auth/config",
+    "API effective Linux capabilities zero; NoNewPrivs=1",
+    "Nonroot worker imports GIS/worker modules"
+  ],
+  "outstanding": [
+    "Runtime OS advisories, including high findings without distro fixes",
+    "Individual static finding disposition",
+    "Real Podman/Jenkins/Harbor/Entra and native-device acceptance",
+    "Matched recovery/cutover on agency infrastructure"
+  ]
+}

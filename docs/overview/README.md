@@ -96,8 +96,7 @@ flowchart TB
 | Part | Technology | Code | More |
 | --- | --- | --- | --- |
 | Web app | React 19, TypeScript, Tailwind, ArcGIS Maps SDK for JavaScript; served by nginx | `web/` | [Web guide](../development/web.md) |
-| iPhone app | Swift, SwiftUI, MSAL (Entra), APNs | `ios/` (branch `claude/ios-swift-app`) | [iOS](../development/ios.md) |
-| Expo app (reference) | React Native / Expo; being replaced by the Swift app | `mobile/` | [Expo app](../development/mobile-expo.md) |
+| iPhone app | Swift, SwiftUI, MSAL (Entra), APNs | `ios/` | [iOS](../development/ios.md) |
 | API | Python 3.12, FastAPI, SQLAlchemy (hand-written SQL), Alembic | `backend/app/` | [Backend guide](../development/backend.md) |
 | Terrain worker | Same code base, GIS stack (rasterio, numpy) | `backend/app/worker/` | [Offline terrain](../architecture/offline-terrain.md) |
 | Database | MariaDB 11, 61 tables | `database/`, `backend/migrations/` | [Data model](../data/README.md) |

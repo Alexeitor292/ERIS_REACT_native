@@ -48,10 +48,10 @@ import {
  * all before the org model — they were `ProtectedRoute`-only, which meant "any
  * account that happens to be signed in" (org model design §8).
  */
-export default function App() {
+export default function App({ basename }: { basename?: string } = {}) {
   return (
     <AuthProvider>
-      <BrowserRouter>
+      <BrowserRouter basename={basename}>
         <SignInSplashProvider>
         <AppErrorBoundary>
         <Routes>

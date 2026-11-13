@@ -1,4 +1,5 @@
 type AppConfig = {
+  guidedDemoEnabled: boolean;
   apiBaseUrl: string;
   entraEnabled: boolean;
   localLoginEnabled: boolean;
@@ -20,6 +21,8 @@ type AppConfig = {
 };
 
 export const appConfig: AppConfig = {
+  // Hosted builds opt in explicitly. Local development enables the demo by default.
+  guidedDemoEnabled: import.meta.env.VITE_GUIDED_DEMO_ENABLED === "true" || (import.meta.env.DEV && import.meta.env.VITE_GUIDED_DEMO_ENABLED !== "false"),
   apiBaseUrl:
     import.meta.env.VITE_API_BASE_URL ??
     import.meta.env.VITE_API_BASE ??

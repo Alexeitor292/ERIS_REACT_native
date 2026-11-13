@@ -1,34 +1,19 @@
-name: Incident Offline Location Contract
-
+name: Incident offline location contract
 on:
-  push:
-    paths:
-      - "mobile/src/components/CreateIncidentScreen.tsx"
-      - "mobile/src/services/roadInventoryOffline.ts"
-      - "mobile/src/offline/incidentQueue.ts"
-      - "mobile/src/offline/syncLoop.ts"
-      - "mobile/app/(tabs)/incidents/create.tsx"
-      - "mobile/scripts/check-incident-offline-location.js"
-      - ".github/workflows/incident-offline-location-contract.yml"
   pull_request:
-    paths:
-      - "mobile/src/components/CreateIncidentScreen.tsx"
-      - "mobile/src/services/roadInventoryOffline.ts"
-      - "mobile/src/offline/incidentQueue.ts"
-      - "mobile/src/offline/syncLoop.ts"
-      - "mobile/app/(tabs)/incidents/create.tsx"
-      - "mobile/scripts/check-incident-offline-location.js"
-      - ".github/workflows/incident-offline-location-contract.yml"
-
+    paths: ["ios/**", ".github/workflows/incident-offline-location-contract.yml"]
+  push:
+    branches: [main]
+    paths: ["ios/**", ".github/workflows/incident-offline-location-contract.yml"]
 jobs:
   contract:
     name: Incident offline location contract
     runs-on: ubuntu-latest
+    container: swift:6.4-noble
+    defaults:
+      run:
+        working-directory: ios/ERISKit
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - name: Assert three-mode offline incident workflow
-        working-directory: mobile
-        run: node scripts/check-incident-offline-location.js
+      - name: Native Swift contract tests
+        run: swift test --filter 'IncidentQueueTests|OfflineTests|RoadInventoryTests'

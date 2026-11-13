@@ -9,7 +9,7 @@ and accounts, which administrators edit in the app.
 | Backend API and offline-scene worker | `backend/.env` when run directly, `deploy/compose/.env.proxmox` in the legacy Compose stack, or `deploy/podman/app.env` in the single-pod stack. Read by `backend/app/config.py`. |
 | MariaDB and SeaweedFS containers | `deploy/compose/.env` / `deploy/compose/.env.proxmox` for Compose, or `deploy/podman/db.env` / `storage.env` for Podman. |
 | Web app | `VITE_*` variables at **build** time: `web/.env` locally, Docker build args in Compose, or `deploy/podman/build-web.sh` flags in the Podman pipeline. |
-| Mobile app | `EXPO_PUBLIC_*` variables at **build** time: `mobile/.env` locally, EAS environment variables for EAS builds. |
+| iOS app | Native build and runtime configuration in `ios/`; see [iOS](../development/ios.md). |
 
 `VITE_*` and `EXPO_PUBLIC_*` values are compiled into the app and readable by
 anyone who has it. Never put a server secret in them.
@@ -138,7 +138,7 @@ server-side values; never reuse them as the web's `VITE_ARCGIS_API_KEY`.
 | --- | --- | --- |
 | `ARCGIS_RUNTIME_ENABLED` | `false` | Turns the runtime configuration on. The Esri offline-scene builder also requires it. |
 | `ARCGIS_API_KEY` | unset | ArcGIS API key for the native runtime. |
-| `ARCGIS_LICENSE_KEY` / `ARCGIS_LICENSE_EXPIRES_AT` | unset | Runtime license string and its expiry. Production: the ArcGIS Maps SDK 200.x license string (a 100.x Runtime license does not license the iOS app's SDK). Staging: leave unset. |
+| `ARCGIS_LICENSE_KEY` / `ARCGIS_LICENSE_EXPIRES_AT` | unset | Runtime license string and its expiry. Production: a valid 100.x/200.x-compatible Runtime string for Swift SDK 200.x; 300.x strings are separate. Staging: leave unset. See [Esri's compatibility rule](https://developers.arcgis.com/swift/license-and-deployment/use-a-license-in-your-app/). |
 | `ARCGIS_MMPK_URL` | unset | URL of an offline mobile map package, if one is published. |
 | `ARCGIS_CONFIG_OFFLINE_TTL_HOURS` | `168` | How long the phone may use a cached configuration while offline. |
 
@@ -231,6 +231,7 @@ Read at build time (`npm run dev`, `npm run build`, or the web Docker image).
 | --- | --- | --- |
 | `VITE_API_BASE_URL` | `/api` | Backend address. Keep it same-origin: the session cookie is not sent to another origin. |
 | `VITE_DEV_API_TARGET` | `http://127.0.0.1:8000` | Where `npm run dev` proxies `/api`. |
+| `VITE_GUIDED_DEMO_ENABLED` | development: on; hosted build: off | Set `true` when the independent `/demo` service is deployed to show Guided Demo on login. The Podman web builder forwards it. Set `false` to hide the invitation even in development. No API access or seed data. See [guided demo](../user-guides/guided-demo.md). |
 | `VITE_API_BASE` | — | Older alias, used only if `VITE_API_BASE_URL` is unset. |
 | `VITE_ARCGIS_API_KEY` | empty | Browser-safe ArcGIS key for the website's maps. Optional in development, where maps fall back to OpenStreetMap's tile servers; required in production (see [map-licensing.md](map-licensing.md)) and restrict it to the site's origin in the ArcGIS dashboard. |
 | `VITE_CALTRANS_POSTMILE_LAYER_URL` | public Caltrans SHN Postmiles Tenth layer | Layer the "Report an incident" form uses to convert between coordinates and route/postmile. Change only to use a mirror. |
@@ -239,15 +240,4 @@ Read at build time (`npm run dev`, `npm run build`, or the web Docker image).
 
 ## Mobile app
 
-Read at build time from `mobile/.env`, or from EAS environment variables for EAS
-builds (`eas.json` loads the `preview` and `production` environments for those
-profiles).
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `EXPO_PUBLIC_API_URL` | derived | Backend address. **Required for every build that runs away from your desk.** Unset, the app tries the Metro bundler's host on port 8000, then `10.0.2.2:8000` on Android, then `127.0.0.1:8000`, which only works in local development. |
-| `EXPO_PUBLIC_WEB_URL` | unset | Web app address, for "Open full 3D map". Unset disables that action. |
-| `EXPO_PUBLIC_CALTRANS_POSTMILE_LAYER_URL` | public Caltrans SHN Postmiles Tenth layer | Postmile layer for online location lookups. |
-| `EXPO_PUBLIC_ARCGIS_MMPK_URL` / `EXPO_PUBLIC_ARCGIS_MMPK_PATH` | unset | An offline mobile map package to preload, if you publish one. |
-
-Session tokens are kept in the device's secure storage (`expo-secure-store`).
+Mobile uses the native Swift application in `ios/`, with the API URL and authentication configured as described in [iOS](../development/ios.md). Expo/EAS build variables are retired. Backend Expo push variables above describe legacy server compatibility only.

@@ -25,16 +25,24 @@ if awk '/^[[:space:]]*#/ {next} /CHANGE_ME|example[.]gov|00000000-0000-0000-0000
   echo "Deployment configuration still contains example values" >&2
   exit 2
 fi
+if [[ "$(uname -s)" == Linux ]]; then
+  for file in db.env storage.env app.env bootstrap.env; do
+    [[ -f "$DEPLOY/$file" ]] || continue
+    mode="$(stat -c '%a' "$DEPLOY/$file")"
+    [[ "$mode" == 600 || "$mode" == 400 ]] || { echo "$file must be private: chmod 600" >&2; exit 2; }
+  done
+fi
 set -a
 # images.env contains image references, not secrets.
 source "$DEPLOY/images.env"
 set +a
+case "${ERIS_REQUIRE_DIGESTS:-false}" in true|false) ;; *) echo "ERIS_REQUIRE_DIGESTS must be true or false" >&2; exit 2 ;; esac
 IMAGE_VARS=(ERIS_API_IMAGE ERIS_WORKER_IMAGE ERIS_WEB_IMAGE ERIS_DB_IMAGE ERIS_STORAGE_IMAGE)
 for name in "${IMAGE_VARS[@]}"; do
   [[ -n "${!name:-}" ]] || { echo "Missing $name" >&2; exit 2; }
   # Production pins the five approved Harbor digests, so a re-pushed tag cannot
   # change what runs. Set ERIS_REQUIRE_DIGESTS=true in images.env to enforce it.
-  if [[ "${ERIS_REQUIRE_DIGESTS:-false}" == true && "${!name}" != *@sha256:* ]]; then
+  if [[ "${ERIS_REQUIRE_DIGESTS:-false}" == true && ! "${!name}" =~ ^[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[a-f0-9]{64}$ ]]; then
     echo "$name must be pinned by digest (name@sha256:...) when ERIS_REQUIRE_DIGESTS=true" >&2
     exit 2
   fi
@@ -50,11 +58,33 @@ if [[ -d "$SECRETS_DIR" ]]; then
     echo "$SECRETS_DIR must be private: chmod 700 the directory and 600 its files" >&2
     exit 2
   fi
-  api_secret_mount=(-v "$SECRETS_DIR:/run/secrets/eris:ro,Z")
+  if [[ -n "$(find "$SECRETS_DIR" -mindepth 1 ! -type f -print -quit)" ]]; then
+    echo "$SECRETS_DIR must contain only regular files (no symlinks or subdirectories)" >&2
+    exit 2
+  fi
 fi
 
+# Copy private host files into Podman's protected secret store at each recreate.
+# The API is UID 10001, including on a rootless host where a mode-600 bind mount
+# owned by the service account would otherwise be unreadable by that UID.
+# --replace updates newly created containers; existing containers are not changed.
+prepare_api_secrets() {
+  local file base name
+  [[ -d "$SECRETS_DIR" ]] || return 0
+  while IFS= read -r -d '' file; do
+    base="${file##*/}"
+    [[ "$base" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || { echo "Unsupported secret filename" >&2; return 1; }
+    name="eris-file-$(printf '%s' "$base" | sha256sum | cut -c1-20)"
+    podman secret create --replace "$name" "$file" >/dev/null
+    api_secret_mount+=(--secret "$name,type=mount,target=/run/secrets/eris/$base,uid=10001,gid=10001,mode=0400")
+  done < <(find "$SECRETS_DIR" -mindepth 1 -maxdepth 1 -type f -print0 | sort -z)
+}
+
 run_tool() {
-  podman run --rm --pod eris --env-file "$DEPLOY/app.env" "$ERIS_API_IMAGE" "$@"
+  # DB/storage/bootstrap tools do not read Entra/APNs key material. Keep those
+  # secrets confined to the API; cert-check executes in that running container.
+  podman run --rm --pod eris --env-file "$DEPLOY/app.env" --user 10001:10001 \
+    --cap-drop=ALL --security-opt=no-new-privileges "$ERIS_API_IMAGE" "$@"
 }
 
 wait_for_api() {
@@ -109,7 +139,7 @@ case "${1:-}" in
     if podman pod exists eris; then echo "Pod eris exists; use status or an explicit stop/update." >&2; exit 2; fi
     podman volume exists "$ERIS_DB_VOLUME" || podman volume create "$ERIS_DB_VOLUME" >/dev/null
     podman volume exists "$ERIS_STORAGE_VOLUME" || podman volume create "$ERIS_STORAGE_VOLUME" >/dev/null
-    podman pod create --name eris -p "${ERIS_BIND_IP}:8080:80" -p "${ERIS_BIND_IP}:9800:8333" >/dev/null
+    podman pod create --name eris -p "${ERIS_BIND_IP}:8080:8080" -p "${ERIS_BIND_IP}:9800:8333" >/dev/null
     podman run -d --restart=unless-stopped --pod eris --name eris-mariadb --env-file "$DEPLOY/db.env" \
       -v "$ERIS_DB_VOLUME:/var/lib/mysql" -v "$ROOT/database/init:/docker-entrypoint-initdb.d:ro,Z" "$ERIS_DB_IMAGE" >/dev/null
     ready=0
@@ -117,7 +147,7 @@ case "${1:-}" in
       if podman exec eris-mariadb healthcheck.sh --connect --innodb_initialized >/dev/null 2>&1; then ready=1; break; fi
       sleep 2
     done
-    [[ "$ready" == 1 ]] || { podman logs eris-mariadb; exit 1; }
+    [[ "$ready" == 1 ]] || { echo 'MariaDB did not become healthy' >&2; podman logs --tail 80 eris-mariadb >&2; exit 1; }
     # The entrypoint healthcheck can pass while init SQL is still finishing.
     seeded=0
     for _ in $(seq 1 60); do
@@ -134,15 +164,22 @@ case "${1:-}" in
     run_tool python -m app.tools.adopt_existing_admin
     if [[ -f "$DEPLOY/bootstrap.env" ]]; then
       podman run --rm --pod eris --env-file "$DEPLOY/app.env" --env-file "$DEPLOY/bootstrap.env" \
+        --user 10001:10001 --cap-drop=ALL --security-opt=no-new-privileges \
         "$ERIS_API_IMAGE" python -m app.tools.bootstrap_initial_admin
     else
       run_tool python -m app.tools.bootstrap_initial_admin
     fi
+    prepare_api_secrets
     podman run -d --restart=unless-stopped --pod eris --name eris-api --env-file "$DEPLOY/app.env" \
+      --cap-drop=ALL --security-opt=no-new-privileges \
+      --user 10001:10001 \
       "${api_secret_mount[@]}" "$ERIS_API_IMAGE" >/dev/null
     podman run -d --restart=unless-stopped --pod eris --name eris-worker --env-file "$DEPLOY/app.env" \
+      --cap-drop=ALL --security-opt=no-new-privileges \
+      --user 10001:10001 \
       "$ERIS_WORKER_IMAGE" python -m app.worker.offline_scene_worker >/dev/null
-    podman run -d --restart=unless-stopped --pod eris --name eris-web "$ERIS_WEB_IMAGE" >/dev/null
+    podman run -d --restart=unless-stopped --pod eris --name eris-web \
+      --user 101:101 --cap-drop=ALL --security-opt=no-new-privileges "$ERIS_WEB_IMAGE" >/dev/null
     wait_for_api
     echo "ERIS pod started on ${ERIS_BIND_IP}:8080 (web/API) and :9800 (S3)."
     ;;
@@ -174,6 +211,15 @@ case "${1:-}" in
     file="${2:?Usage: $0 release RELEASE_IMAGES_ENV}"
     if [[ -f "$DEPLOY/release.env" ]]; then set -a; source "$DEPLOY/release.env"; set +a; fi
     backup_root="${ERIS_BACKUP_ROOT:?Set ERIS_BACKUP_ROOT in release.env}"
+    case "${ERIS_VERIFY_PROFILE:-production}" in
+      production)
+        for url in "${ERIS_PUBLIC_URL:-}" "${ERIS_FILES_URL:-}"; do
+          [[ "$url" =~ ^https://[^/@?#[:space:]]+/?$ ]] || { echo "Production release requires ERIS_PUBLIC_URL and ERIS_FILES_URL as HTTPS origins" >&2; exit 2; }
+        done
+        ;;
+      rehearsal) ;;
+      *) echo "ERIS_VERIFY_PROFILE must be production or rehearsal" >&2; exit 2 ;;
+    esac
     check_release_file "$file"
     podman pod exists eris || { echo "No running ERIS pod: use up for the first installation" >&2; exit 2; }
     if ! mkdir "$DEPLOY/.release.lock" 2>/dev/null; then
@@ -181,10 +227,13 @@ case "${1:-}" in
       exit 2
     fi
     trap 'rmdir "$DEPLOY/.release.lock" 2>/dev/null || true' EXIT
-    stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    # Fast successive releases must never reuse a pre-release backup or rollback
+    # volume name just because they began in the same wall-clock second.
+    stamp="$(date -u +%Y%m%dT%H%M%SZ)-$$"
     new_api="$(sed -n 's/^ERIS_API_IMAGE=//p' "$file")"
     staged="$(mktemp)"
     cp "$file" "$staged"
+    grep -q '^ERIS_REQUIRE_DIGESTS=' "$staged" || echo 'ERIS_REQUIRE_DIGESTS=true' >> "$staged"
 
     # 1. Every new image, through the signature policy, before anything stops.
     while IFS='=' read -r name ref; do

@@ -34,7 +34,7 @@ function Field({ label, required = false, hint, children }: { label: string; req
 /** What still stands between the form and a report, in words for the footer. */
 export function createBlocker(form: IncidentCreateForm): string | null {
   if (!form.first_observed_at.trim()) return "Say when it was first seen.";
-  if (!form.location) return "Place it — on the map, by route and post mile, or by coordinates.";
+  if (!form.location) return "Confirm the location: click the map, or use the Find post mile button after entering its details.";
   return null;
 }
 

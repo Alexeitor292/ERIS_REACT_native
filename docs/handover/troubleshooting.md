@@ -78,7 +78,7 @@ The web returns to `/login?entra=<reason>` after a failed Entra sign-in:
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| Jenkins fails at "SBOM and vulnerability gate" | A fixable HIGH/CRITICAL vulnerability or an embedded secret | Read `release/sbom/<image>.vulns.json`; update the dependency or base image. Exceptions only with approval ([supply chain](../security/supply-chain.md#vulnerability-exceptions)). |
+| Jenkins fails at "SBOM and vulnerability gate" | A known vulnerabilities at all severities vulnerability or an embedded secret | Read `release/sbom/<image>.vulns.json`; update the dependency or base image. Exceptions only with approval ([supply chain](../security/supply-chain.md#vulnerability-exceptions)). |
 | `eris-pod.sh pull` fails with a signature error | The image is not signed by the key in the host policy, or the policy points at the wrong key | Use only digests from a successful pipeline run; check `cosign.pub` on the host. |
 | `release` printed "Release FAILED; rolling back" | The new release did not become healthy or failed verification | The host is back on the previous images and data (`releases.log`, `volumes.env`). Investigate on staging before retrying. |
 | `release` printed "ROLLBACK FAILED" | Rare: the restore also failed | Recover manually from the pre-release backup it names ([restore](../operations/caltrans-podman.md#backup-and-restore)). |

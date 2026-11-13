@@ -1,0 +1,34 @@
+# Candidate agency mirror: retain MariaDB's official entrypoint/health scripts,
+# use Alpine's supported server packages, and rebuild gosu with patched Go/deps.
+# Scan/sign the result
+# before setting MARIADB_SOURCE in Jenkins; do not overwrite the upstream tag.
+FROM golang:1.27.4-alpine@sha256:0a5f7fe796599ff487605987432e7619ae45beeb2fba4c2ce0b907879932aebf AS gosu
+ENV CGO_ENABLED=0 GOTOOLCHAIN=local
+WORKDIR /src
+ADD --checksum=sha256:207a2045e890d3ca3326027c5f585733085960b401a49dbc00e3bb628c054cf8 https://github.com/tianon/gosu/archive/refs/tags/1.20.tar.gz /tmp/gosu.tgz
+RUN tar xzf /tmp/gosu.tgz --strip-components=1 -C /src \
+    && go get golang.org/x/sys@v0.44.0 \
+    && go build -trimpath -o /go/bin/gosu . \
+    && /go/bin/gosu nobody id
+
+FROM mariadb:11@sha256:d36f18d65a0459510b8b0f643b226a6d299e3206486e2b64ff20754a6d291707 AS upstream
+
+# Use supported Alpine packages for the same MariaDB 11.8 server series. Keep
+# package metadata and the upstream initialization/health scripts intact.
+FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+RUN apk upgrade --no-cache \
+    && apk add --no-cache mariadb=11.8.9-r0 mariadb-client=11.8.9-r0 \
+       mariadb-server-utils=11.8.9-r0 bash coreutils findutils tzdata pwgen zstd xz openssl \
+    && mkdir -p /run/mysqld /docker-entrypoint-initdb.d \
+    && chown mysql:mysql /run/mysqld /var/lib/mysql \
+    && sed -i '/^[[:space:]]*skip-networking/s/^/#/' /etc/my.cnf.d/mariadb-server.cnf \
+    && date --rfc-3339=seconds >/dev/null \
+    && find /docker-entrypoint-initdb.d -maxdepth 0 -true >/dev/null
+COPY --from=gosu /go/bin/gosu /usr/local/bin/gosu
+COPY --from=upstream /usr/local/bin/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY --from=upstream /usr/local/bin/healthcheck.sh /usr/local/bin/healthcheck.sh
+ENV MARIADB_VERSION=11.8.9
+VOLUME /var/lib/mysql
+EXPOSE 3306
+ENTRYPOINT ["docker-entrypoint.sh"]
+CMD ["mariadbd", "--user=mysql", "--datadir=/var/lib/mysql", "--socket=/run/mysqld/mysqld.sock", "--bind-address=0.0.0.0"]
