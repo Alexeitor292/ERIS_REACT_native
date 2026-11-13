@@ -291,7 +291,7 @@ class ImagePackageTests(unittest.TestCase):
     def database_evidence(self, image_id="sha256:" + "c" * 64):
         folder = Path(self.work.name) / "database"
         folder.mkdir(exist_ok=True)
-        (folder / "candidate-db.log").write_text(f"Candidate MariaDB source: {COMMIT}\nCandidate MariaDB image: {image_id}\n{package.DATABASE_MARKER}\n")
+        (folder / "candidate-db.log").write_text(f"progress: \u2581\nCandidate MariaDB source: {COMMIT}\nCandidate MariaDB image: {image_id}\n{package.DATABASE_MARKER}\n", encoding="utf-8")
         (folder / "candidate-db.xml").write_text('<testsuites><testsuite tests="2" errors="0" failures="0" skipped="0" /></testsuites>')
         return folder
 

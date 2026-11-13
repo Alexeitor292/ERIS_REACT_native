@@ -131,12 +131,12 @@ def inspect_candidate(folder: Path, name: str, commit: str) -> dict:
         path = folder / file
         if path.is_symlink() or not path.is_file():
             raise ValueError(f"{name}: candidate evidence must be regular files")
-    if (folder / "source-commit.txt").read_text().strip() != commit:
+    if (folder / "source-commit.txt").read_text(encoding="utf-8").strip() != commit:
         raise ValueError(f"{name}: source commit mismatch")
-    identity = (folder / "image-id.txt").read_text().strip()
+    identity = (folder / "image-id.txt").read_text(encoding="utf-8").strip()
     if not SHA256.fullmatch(identity):
         raise ValueError(f"{name}: malformed image identity")
-    report = json.loads((folder / "scan.json").read_text())
+    report = json.loads((folder / "scan.json").read_text(encoding="utf-8"))
     metadata = report["Metadata"]
     if metadata["ImageID"] != identity:
         raise ValueError(f"{name}: report image identity mismatch")
@@ -151,7 +151,7 @@ def inspect_candidate(folder: Path, name: str, commit: str) -> dict:
     for result in report["Results"]:
         if result.get("Vulnerabilities") or result.get("Secrets"):
             raise ValueError(f"{name}: vulnerability/secret gate has findings")
-    sbom = json.loads((folder / "sbom.cdx.json").read_text())
+    sbom = json.loads((folder / "sbom.cdx.json").read_text(encoding="utf-8"))
     if sbom.get("bomFormat") != "CycloneDX" or not sbom.get("components"):
         raise ValueError(f"{name}: missing package SBOM")
     properties = {p["name"]: p["value"] for p in sbom.get("metadata", {}).get("component", {}).get("properties", [])}
@@ -174,7 +174,7 @@ def inspect_database_evidence(folder: Path, commit: str, identity: str) -> dict:
         path = folder / name
         if path.is_symlink() or not path.is_file():
             raise ValueError("Database integration evidence must be regular files")
-    lines = (folder / "candidate-db.log").read_text().splitlines()
+    lines = (folder / "candidate-db.log").read_text(encoding="utf-8").splitlines()
     if not all(value in lines for value in (DATABASE_MARKER, f"Candidate MariaDB source: {commit}",
                                              f"Candidate MariaDB image: {identity}")):
         raise ValueError("Database integration evidence lacks matching source/image/success markers")
@@ -219,11 +219,11 @@ def main() -> None:
     blocked = [path for path in paths if restricted(path)]
     if blocked:
         parser.error("Restricted tracked paths: " + ", ".join(blocked))
-    log = args.rehearsal_log.read_text()
+    log = args.rehearsal_log.read_text(encoding="utf-8")
     if RECOVERY_MARKER not in log.splitlines():
         parser.error("Successful five-image recovery evidence is required")
     try:
-        signature_log = args.signature_log.read_text()
+        signature_log = args.signature_log.read_text(encoding="utf-8")
     except OSError:
         parser.error("Signature-enforcement evidence could not be read")
     if SIGNATURE_MARKER not in signature_log.splitlines():
