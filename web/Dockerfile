@@ -1,4 +1,4 @@
-FROM node:22-alpine AS prepared
+FROM node:25-alpine AS prepared
 
 WORKDIR /app
 
