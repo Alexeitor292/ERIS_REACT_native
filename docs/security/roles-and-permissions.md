@@ -2,7 +2,7 @@
 
 The current role model, the per-record permits beside it, and how the account
 tables are prepared for Entra ID. Source of truth: `backend/app/roles.py`
-(server) with `web/src/utils/roleModel.ts` and `mobile/src/utils/roleModel.ts`
+(server) with `web/src/utils/roleModel.ts` and the Swift role model in `ios/ERISKit/`
 mirroring it for UI gating only. The server enforces every rule below; the
 clients only hide what a person cannot use.
 

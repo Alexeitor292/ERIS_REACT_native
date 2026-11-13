@@ -1,3 +1,5 @@
+-c constraints.txt
+# Transitive versions are frozen in constraints.txt; update and audit together.
 # Pinned together. Starlette 1.x wraps included routers instead of copying their
 # routes into app.routes: walk routes with tests/route_table.api_routes, never
 # app.routes. 1.3.1+ fixes the Host/path URL reconstruction and the unbounded

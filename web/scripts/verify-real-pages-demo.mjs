@@ -1,0 +1,108 @@
+import { pathToFileURL } from "node:url";
+import assert from "node:assert/strict";
+import { mkdir } from "node:fs/promises";
+import path from "node:path";
+const { chromium } = await import(process.env.ERIS_PLAYWRIGHT_MODULE ? pathToFileURL(process.env.ERIS_PLAYWRIGHT_MODULE).href : "playwright");
+const base = process.env.ERIS_DEMO_URL || "http://127.0.0.1:5174";
+const output = process.env.ERIS_DEMO_SCREENSHOTS;
+if (output) await mkdir(output, { recursive: true });
+const browser = await chromium.launch({ headless: true });
+const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, storageState: process.env.ERIS_DEMO_AUTH_STATE });
+const page = await context.newPage();
+page.setDefaultTimeout(15000);
+await page.addInitScript(() => {
+  const local = window.localStorage, session = window.sessionStorage;
+  local.setItem("eris_demo_isolation_sentinel", "unchanged"); session.setItem("eris_demo_isolation_sentinel", "unchanged");
+  const touched = [];
+  for (const name of ["getItem", "setItem", "removeItem", "clear"]) {
+    const original = Storage.prototype[name];
+    Storage.prototype[name] = function (...args) { touched.push([name, args[0]]); return original.apply(this, args); };
+  }
+  window.demoNativeStorageTouches = touched;
+});
+const errors = [], requests = [];
+page.on("console", (message) => { if (message.type() === "error" && !message.text().includes("[esri.Basemap]")) console.error(message.text()); });
+page.on("pageerror", (error) => errors.push(error.message));
+page.on("request", (request) => { const u = new URL(request.url()); if (/^\/(api|auth)\/|\/__mock_api__\//.test(u.pathname)) requests.push(request.url()); });
+async function shot(name) { if (output) { await page.screenshot({ path: path.join(output, `${name}.png`), fullPage: true }); await page.screenshot({ path: path.join(output, `${name}-viewport.png`), fullPage: false }); } }
+async function step(number) { await page.getByText(`Step ${number} of 16 · Actual ERIS web pages`, { exact: true }).waitFor(); console.log(`Step ${number}`); }
+async function next() { const btn = page.getByRole("button", { name: "Continue", exact: true }); await btn.waitFor(); await page.waitForFunction(() => ![...document.querySelectorAll('.eris-demo-guide button')].find((e) => e.textContent === "Continue")?.disabled, null, { timeout: 15000 }); await btn.click(); }
+try {
+  await page.goto(`${base}/demo/`);
+  await page.getByRole("button", { name: "Start guided web demo", exact: true }).click();
+  await step(1);
+  await page.getByRole("button", { name: "Report an incident", exact: true }).click();
+  await next(); await step(2);
+  await page.getByRole("radio", { name: "Coordinates", exact: true }).click();
+  await page.getByLabel("Latitude", { exact: true }).fill("38.450100");
+  await page.getByLabel("Longitude", { exact: true }).fill("-122.900100");
+  await page.getByRole("button", { name: "Find its post mile", exact: true }).click();
+  await next(); await step(3);
+  await page.getByLabel("What was seen", { exact: true }).fill("Demo slope failure after rain. Debris beside the highway; sample observations only.");
+  await page.locator('input[type="datetime-local"]').first().fill("2026-11-09T09:00");
+  await page.locator('input[type="file"]').first().setInputFiles({ name: "demo-evidence.txt", mimeType: "text/plain", buffer: Buffer.from("Fictional demo evidence. No real incident data.") });
+  await shot("real-report");
+  await next(); await step(4);
+  await page.getByRole("button", { name: "Send report", exact: true }).click();
+  await next(); await step(5);
+  await page.getByText("demo-evidence.txt", { exact: true }).first().waitFor();
+  await page.getByRole("radio", { name: "Complete review and continue", exact: true }).check();
+  await page.getByLabel("Review notes / reason (required)", { exact: true }).fill("Sample report reviewed. Please evaluate the need for geotechnical input.");
+  await shot("real-maintenance-review");
+  await page.getByRole("button", { name: "Record action", exact: true }).click();
+  await next(); await step(6);
+  await page.getByRole("radio", { name: "Send to GeoTech", exact: true }).check();
+  await page.getByLabel("New group name (optional)", { exact: true }).fill("Demo storm event");
+  await page.getByLabel("Review notes / reason (required)", { exact: true }).fill("Geotechnical assessment needed for this fictional example.");
+  await shot("real-referral");
+  await page.getByRole("button", { name: "Record action", exact: true }).click();
+  await next(); await step(7);
+  await page.getByRole("button", { name: "Hand off to a branch chief", exact: true }).click();
+  await page.getByRole("combobox", { name: "Branch chief", exact: true }).click();
+  await page.getByRole("option", { name: /Casey Nguyen/ }).click();
+  await shot("real-routing");
+  await page.getByRole("button", { name: "Hand off", exact: true }).click();
+  await next(); await step(8);
+  await page.getByRole("combobox", { name: "Staff member", exact: true }).click();
+  await page.getByRole("option", { name: /Sam Rivera/ }).click();
+  await page.getByRole("button", { name: "Assign Staff member", exact: true }).click();
+  await next(); await step(9);
+  await page.getByRole("link", { name: "Fill out submission #1", exact: true }).click();
+  console.log("Opened form", page.url());
+  await next(); await step(10);
+  await page.getByRole("button", { name: "Save draft", exact: true }).waitFor();
+  await page.locator('.tiptap[contenteditable="true"]').first().fill("Fictional demo observations. No field inspection or engineering recommendation is represented.");
+  await page.getByRole("button", { name: "Save draft", exact: true }).click();
+  await shot("real-gisa");
+  await next(); await step(11);
+  await page.getByRole("button", { name: "Submit for review", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Submit for review", exact: true }).click();
+  await next(); await step(12);
+  await page.getByPlaceholder("Optional workflow notes").fill("Please clarify that the sample evidence is an illustration.");
+  await page.getByRole("button", { name: "Request revision", exact: true }).click();
+  await next(); await step(13);
+  await page.locator('.tiptap[contenteditable="true"]').first().fill("Revised fictional demo observations. Evidence is an illustration, not a real site photograph. No engineering conclusions are drawn.");
+  await page.getByRole("button", { name: "Save draft", exact: true }).click();
+  await next(); await step(14);
+  await page.getByRole("button", { name: "Submit for review", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: /^(Resubmit|Submit) for review$/ }).click();
+  await next(); await step(15);
+  await page.getByRole("button", { name: "Approve assessment", exact: true }).click();
+  await next(); await step(16);
+  await page.getByText("Complete.", { exact: true }).waitFor();
+  await shot("real-approved-record");
+  await page.getByRole("button", { name: "Finish & clear", exact: true }).click();
+  await page.getByRole("heading", { name: "Demo complete. All mock data cleared." }).waitFor();
+  assert.deepEqual(await page.evaluate(() => window.demoNativeStorageTouches), []);
+  assert.deepEqual(errors, []); assert.deepEqual(requests, []);
+  await page.getByRole("button", { name: "Start a fresh demo", exact: true }).click();
+  await step(1);
+  await page.getByRole("button", { name: "Exit and clear demo", exact: true }).click();
+  await page.getByRole("button", { name: "Start guided web demo", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Start guided web demo", exact: true }).click();
+  await page.reload();
+  await page.getByRole("button", { name: "Start guided web demo", exact: true }).waitFor();
+  const other = await page.context().newPage(); await other.goto(`${base}/demo/`); await other.getByRole("button", { name: "Start guided web demo", exact: true }).waitFor(); await other.close();
+  console.log("PASS: actual ERIS pages and dialogs, complete workflow through approval, revision loop, finish/exit/reload/tab isolation, no real API requests or native browser-storage access.");
+} catch (error) { await shot("failure"); console.error({ errors, requests, text: (await page.locator("body").innerText()).slice(-12000) }); throw error; }
+finally { await browser.close(); }

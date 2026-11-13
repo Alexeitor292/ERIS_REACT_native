@@ -11,19 +11,11 @@ jobs:
   contract:
     name: Native camera telemetry contract
     runs-on: ubuntu-latest
+    container: swift:6.4-noble
     defaults:
       run:
-        working-directory: mobile
+        working-directory: ios/ERISKit
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: mobile/package-lock.json
-      - name: Install dependencies
-        run: npm ci
-      - name: Site Photo Map source contract
-        run: node scripts/check-site-photo-map-contract.mjs
-      - name: TypeScript check
-        run: npx tsc -p tsconfig.json --noEmit
+      - name: Native Swift camera and photo evidence tests
+        run: swift test --filter 'PhotoCaptureTests|PhotoCorrectionsTests'

@@ -11,6 +11,10 @@ original author. **If something you needed is missing, add it here**: see
 
 ## Start here
 
+November 2026 transition: owner **Deh Jeng Jang**; agency staging and production
+hosting pending Caltrans IT assignment. Start with the
+[handoff package and current work register](handover/README.md).
+
 | You are… | Read, in order |
 | --- | --- |
 | **Taking over ERIS** (IT owner, new maintainer) | [Handover guide](handover/README.md) → [System overview](overview/README.md) → [Operations](operations/README.md) |
@@ -45,12 +49,12 @@ flowchart TB
 | [architecture/](architecture/README.md) | [Architecture](architecture/README.md) (context, containers, components, layers), [request flows](architecture/request-flows.md) (sequence diagrams), [deployment topologies](architecture/deployment-topologies.md), [workflows](architecture/workflows.md) (state machines), [offline terrain](architecture/offline-terrain.md) |
 | [data/](data/README.md) | [Data model](data/README.md), [ERD](data/erd.md) and [schema reference](data/schema-reference.md) (both generated), [migrations](data/migrations.md), [MinIO to SeaweedFS migration](data/storage-migration.md) |
 | [security/](security/README.md) | [Security architecture](security/README.md), [authentication and sessions](security/authentication-and-sessions.md), [roles and permissions](security/roles-and-permissions.md), [supply chain](security/supply-chain.md), [secrets and keys](security/secrets-and-keys.md), [incident response](security/incident-response.md) |
-| [development/](development/README.md) | [Development guide](development/README.md), [getting started](development/getting-started.md), [testing](development/testing.md), [backend](development/backend.md), [web](development/web.md), [iOS app](development/ios.md), [Expo app (reference)](development/mobile-expo.md), [conventions](development/conventions.md) |
+| [development/](development/README.md) | [Development guide](development/README.md), [getting started](development/getting-started.md), [testing](development/testing.md), [backend](development/backend.md), [web](development/web.md), [iOS app](development/ios.md), [conventions](development/conventions.md) |
 | [operations/](operations/README.md) | [Environments: dev, test, prod](operations/README.md), [Caltrans Podman runbook](operations/caltrans-podman.md), [Compose deployment](operations/compose-deployment.md), [configuration](operations/configuration.md), [monitoring and troubleshooting](operations/monitoring-and-troubleshooting.md), [offline scene packages](operations/offline-scene-packages.md), [history](operations/history/proxmox-podman-cutover.md) |
 | [user-guides/](user-guides/README.md) | [By role](user-guides/README.md), [administration](user-guides/administration.md), [maintenance workflows](user-guides/maintenance-workflows.md) |
 | [reference/](reference/api.md) | [API](reference/api.md) (generated), [GISA data dictionary](reference/gisa-data-dictionary.md), [road inventory glossary](reference/road-inventory-glossary.md) |
 | [decisions/](decisions/README.md) | Architecture decision records |
-| [caltrans/](caltrans/it-deployment-brief.md) | [IT deployment briefing](caltrans/it-deployment-brief.md), [readiness audit](caltrans/readiness-audit.md), [PDF handout](caltrans/eris-caltrans-it-briefing.pdf) |
+| [caltrans/](caltrans/it-deployment-brief.md) | [IT deployment briefing](caltrans/it-deployment-brief.md), [readiness audit](caltrans/readiness-audit.md), [historical October PDF](caltrans/eris-caltrans-it-briefing.pdf), [November licensing](caltrans/licensing-bill-of-materials.md) |
 
 ## Documentation that cannot drift
 

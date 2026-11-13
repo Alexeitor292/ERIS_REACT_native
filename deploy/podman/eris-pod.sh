@@ -139,8 +139,10 @@ case "${1:-}" in
       run_tool python -m app.tools.bootstrap_initial_admin
     fi
     podman run -d --restart=unless-stopped --pod eris --name eris-api --env-file "$DEPLOY/app.env" \
+      --cap-drop=ALL --security-opt=no-new-privileges \
       "${api_secret_mount[@]}" "$ERIS_API_IMAGE" >/dev/null
     podman run -d --restart=unless-stopped --pod eris --name eris-worker --env-file "$DEPLOY/app.env" \
+      --cap-drop=ALL --security-opt=no-new-privileges \
       "$ERIS_WORKER_IMAGE" python -m app.worker.offline_scene_worker >/dev/null
     podman run -d --restart=unless-stopped --pod eris --name eris-web "$ERIS_WEB_IMAGE" >/dev/null
     wait_for_api

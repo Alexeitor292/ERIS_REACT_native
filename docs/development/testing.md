@@ -19,15 +19,14 @@ flowchart TB
     end
     subgraph integration["Integration (CI, disposable MariaDB)"]
         i1["pytest -m db<br/>workflows, permissions, sharing, notifications"]
-        i2["Clean base → head migration"]
+        i2["Clean base â†’ head migration"]
         i3["Worker image import + DEM fixture"]
     end
     subgraph unit["Unit (CI, no services)"]
         u1["pytest -m 'not db'<br/>sessions, Entra, route guards, services"]
         u2["web: node --test *Model.test.ts"]
-        u3["mobile: Jest + source contracts"]
+        u3["Native Swift: ERISKit and focused contract tests"]
         u4["Script tests with stub podman / curl"]
-        u5["ERISKit swift test (iOS branch)"]
     end
     unit --> integration --> deploy --> manual
 ```
@@ -40,11 +39,10 @@ flowchart TB
 | Backend security subset | `backend/` | `python -m pytest tests/test_session_security.py tests/test_entra_oidc.py tests/test_entra_certificate_and_mobile.py tests/test_route_guards.py tests/test_admin_handover.py tests/test_apns_push.py` | Same |
 | Backend database | `backend/` | `python -m pytest tests -m db` | A **disposable** MariaDB at head with mock accounts ([setup](getting-started.md#tests)) |
 | Migrations | `backend/` | `alembic upgrade head && alembic upgrade head` | A fresh database loaded with `010_schema.sql` |
-| Web | `web/` | `npm test` then `npm run build` | — |
-| Expo app | `mobile/` | `npm test`, `npx tsc --noEmit`, `npx expo lint` | — |
+| Web | `web/` | `npm test` then `npm run build` | â€” |
 | Deployment scripts | repo root | `bash deploy/podman/tests/test-eris-pod.sh`, `bash deploy/podman/tests/test-verify-rehearsal.sh`, `bash deploy/ci/tests/test-release-gate.sh` | bash (stubs replace podman and curl) |
 | Docs | repo root | `python scripts/docs/check_links.py`, `python scripts/docs/generate_api_reference.py --check` | Backend virtualenv |
-| iPhone core | `ios/ERISKit/` (iOS branch) | `swift test` | Swift 5.10+ (macOS or Linux) |
+| iPhone core | `ios/ERISKit/` | `swift test` | Swift 5.10+ (macOS or Linux) |
 
 Without `backend/.env`, set placeholders in the shell for the unit suite:
 
@@ -58,14 +56,13 @@ export JWT_SECRET=dev_placeholder_secret DB_PASS=x S3_ACCESS_KEY=x S3_SECRET_KEY
 | --- | --- | --- |
 | `ci.yml` | Backend (non-DB) | Every module compiles; Alembic has one head; unit tests pass |
 | `ci.yml` | Backend (DB + offline-scene) | Integration tests on fresh MariaDB 11 seeded with mock accounts |
-| `ci.yml` | Backend (clean base→head migration) | A brand-new install migrates to head, and re-running is a no-op |
+| `ci.yml` | Backend (clean baseâ†’head migration) | A brand-new install migrates to head, and re-running is a no-op |
 | `ci.yml` | Worker image | The worker image builds and its GIS stack imports and decodes a DEM |
 | `ci.yml` | Web | `npm test`, TypeScript check, production build |
-| `ci.yml` | Mobile, iOS native compile | Expo source contracts, lint, types, Jest, prebuild, simulator compile |
 | `ci.yml` | Compose | Both Compose files render; the backend never receives the browser ArcGIS key |
 | `ci.yml` | Dependency audit | No known vulnerability in Python (`pip-audit`) or web (`npm audit`, high and above) dependencies |
 | `docs.yml` | Docs | Links resolve; API reference, ERD and schema reference match the code and a migrated database |
-| four `*-contract.yml` | Mobile contracts | Offline terrain, incident map and site photo map contracts |
+| `ios.yml` and four `*-contract.yml` | Native Swift mobile | ERISKit tests and Xcode simulator build; focused native photo, offline and location tests |
 | Jenkins | Validate, Backend security checks | Script tests; the security suite inside the built API image |
 
 A pull request should not be merged with a red check. If a check is flaky,

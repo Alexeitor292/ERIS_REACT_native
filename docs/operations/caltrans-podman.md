@@ -29,7 +29,7 @@ Record these before production cutover:
 | Harbor | Host/project, robot pull credentials on server, robot push credentials in Jenkins, image scanning policy, and mirror locations for MariaDB 11 and SeaweedFS 4.50. Pin approved digests for production. |
 | TLS and DNS | Browser URL (for example `https://eris.example.gov`) and S3 URL (`https://eris-files.example.gov`). A proxy on the same host uses `127.0.0.1:8080` and `127.0.0.1:9800`. A remote proxy needs the pod ports bound to a private host interface with firewall rules. Preserve S3 `Host`, path, query and percent encoding. Upload body limit must exceed `MAX_UPLOAD_MB` (default 95 MB). |
 | Entra | Workforce tenant ID, authority cloud (`login.microsoftonline.com` or Azure Government `login.microsoftonline.us`), web app client ID, the client **certificate** (issued by Caltrans PKI or self-signed, per policy), the mobile app registration if mobile is in scope, app registration owner, and the first administrator's **user object ID**. Register web redirect URI exactly `https://eris.example.gov/api/auth/entra/callback`. Single-tenant app; no group or app role grants ERIS privileges. |
-| Network | Outbound HTTPS to the chosen Entra authority for sign-in and signing keys; Harbor; optional USGS, Caltrans and other GIS services for terrain jobs; optional SMTP and Expo push. Browsers and future phones must reach both URLs. |
+| Network | Outbound HTTPS to the chosen Entra authority for sign-in and signing keys; Harbor; optional USGS, Caltrans and other GIS services for terrain jobs; optional SMTP and APNs push. Browsers and future phones must reach both URLs. |
 | Operations | Backup location and retention, restart owner, log collection, RPO/RTO, certificate rotation, secret rotation, maintenance window, and vulnerability scan gate. |
 
 ## Files and secrets
@@ -122,8 +122,8 @@ For each release (`HARBOR_HOST`, `HARBOR_PROJECT`, an immutable `RELEASE_TAG`):
 4. **SBOM and vulnerability gate**
    ([`deploy/ci/release-gate.sh`](../../deploy/ci/release-gate.sh)).
    [Trivy](https://trivy.dev/) writes a CycloneDX SBOM of every package in each
-   image. The build fails on a `TRIVY_SEVERITY` (default HIGH,CRITICAL)
-   vulnerability that has a fix available, or on any secret embedded in an
+   image. The build fails on a `TRIVY_SEVERITY` (default all severities)
+   vulnerability, including one without a published fix, or on any secret embedded in an
    image. Nothing is pushed if this fails. Accepted exceptions go in
    [`.trivyignore`](../../.trivyignore), each with a reason, an approver and an
    expiry, reviewed like code.
@@ -570,10 +570,11 @@ Entra setup (IT):
    `access_as_user`, admin consent only. In its **Manifest**, set
    `"requestedAccessTokenVersion": 2`; ERIS accepts only v2.0 tokens.
 2. Create a second app registration, **ERIS Mobile**, single tenant. Under
-   **Authentication → Add a platform → Mobile and desktop applications**, add
-   the redirect URI `com.juancampos.eris.mobile://auth/entra` (the app's bundle
-   identifier; a Caltrans build with another identifier changes both the URI
-   and `EXPO_PUBLIC_ENTRA_REDIRECT_URI`). Add no secret or certificate.
+   **Authentication → Add a platform → iOS / macOS**, register the production
+   bundle ID `gov.ca.dot.eris` (or the approved staging bundle ID). Use MSAL's
+   generated redirect `msauth.<bundle-id>://auth`, matching `Info.plist` and the
+   broker configuration in the [iOS specification](../development/ios.md).
+   Add no secret or certificate.
 3. Under **API permissions**, add the delegated permission
    `access_as_user` on the ERIS web API and grant admin consent.
 4. Apply the same assignment and Conditional Access policy to ERIS Mobile.
@@ -582,7 +583,7 @@ Entra setup (IT):
    these public values from `/api/auth/config`, so no app rebuild is needed.
 
 **Intune.** What the app needs depends on the Conditional Access grant that
-Caltrans applies to iOS and Android; Caltrans's Intune admin must confirm it:
+Caltrans applies to the supported native iOS app; Caltrans's Intune admin must confirm it:
 
 - **Require a compliant device** (devices enrolled through Company Portal). The
   system-browser sign-in can pass device state through the **Microsoft

@@ -7,6 +7,7 @@ out of date. For how the system works today, see the rest of [docs/](../README.m
 
 | Record | Decision |
 | --- | --- |
+| [adr-isolated-guided-demo.md](adr-isolated-guided-demo.md) | Account-free walkthrough with disposable browser-memory data |
 | [adr-native-offline-3d-terrain-mobile.md](adr-native-offline-3d-terrain-mobile.md) | Native offline 3D terrain on the phone, and the automatic package pipeline |
 | [adr-mobile-esri-offline-terrain-v3.md](adr-mobile-esri-offline-terrain-v3.md) | Offline terrain v3: Esri tiled-scene visualization |
 | [adr-interactive-3d-terrain-viewer.md](adr-interactive-3d-terrain-viewer.md) | The interactive 3D terrain viewer |

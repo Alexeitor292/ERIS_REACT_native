@@ -16,7 +16,7 @@ from urllib.parse import unquote
 ROOT = Path(__file__).resolve().parents[2]
 LINK = re.compile(r"(?<!!)\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)|!\[[^\]]*\]\(([^)\s]+)\)")
 FENCE = re.compile(r"^(```|~~~)")
-SKIP = ("node_modules/", "mobile/android/", "mobile/ios/")
+SKIP = ("node_modules/",)
 
 
 def slugify(heading: str) -> str:

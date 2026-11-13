@@ -6,6 +6,30 @@ Keys: **PK** primary key, **FK** foreign key, **UK** unique.
 
 ## Identity and access
 
+### `delegated_actions`
+
+| Column | Type | Null | Default | Key |
+| --- | --- | --- | --- | --- |
+| `id` | bigint | no |  | PK |
+| `delegation_id` | bigint | no |  | FK |
+| `actor_user_id` | bigint | no |  | FK |
+| `acting_for_user_id` | bigint | no |  | FK |
+| `method` | varchar(8) | no |  |  |
+| `path` | varchar(255) | no |  |  |
+| `created_at` | datetime | no | current_timestamp() |  |
+
+References:
+
+- `acting_for_user_id` → `users.id` (on delete cascade)
+- `actor_user_id` → `users.id` (on delete cascade)
+- `delegation_id` → `user_delegations.id` (on delete cascade)
+
+Indexes:
+
+- `fk_delegated_action_actor` on `actor_user_id`
+- `fk_delegated_action_for` on `acting_for_user_id`
+- `ix_delegated_action_delegation` on `delegation_id, created_at`
+
 ### `deployment_bootstrap`
 
 | Column | Type | Null | Default | Key |
@@ -34,6 +58,35 @@ Keys: **PK** primary key, **FK** foreign key, **UK** unique.
 Indexes:
 
 - `name` on `name` (unique)
+
+### `user_delegations`
+
+| Column | Type | Null | Default | Key |
+| --- | --- | --- | --- | --- |
+| `id` | bigint | no |  | PK |
+| `delegator_user_id` | bigint | no |  | FK |
+| `delegate_user_id` | bigint | no |  | FK |
+| `starts_on` | date | no |  |  |
+| `ends_on` | date | no |  |  |
+| `note` | varchar(500) | yes |  |  |
+| `created_by_user_id` | bigint | no |  | FK |
+| `created_at` | datetime | no | current_timestamp() |  |
+| `cancelled_at` | datetime | yes |  |  |
+| `cancelled_by_user_id` | bigint | yes |  | FK |
+
+References:
+
+- `cancelled_by_user_id` → `users.id` (on delete set null)
+- `created_by_user_id` → `users.id`
+- `delegate_user_id` → `users.id` (on delete cascade)
+- `delegator_user_id` → `users.id` (on delete cascade)
+
+Indexes:
+
+- `fk_delegation_canceller` on `cancelled_by_user_id`
+- `fk_delegation_creator` on `created_by_user_id`
+- `ix_delegation_delegate` on `delegate_user_id, starts_on, ends_on`
+- `ix_delegation_delegator` on `delegator_user_id, starts_on, ends_on`
 
 ### `user_external_identities`
 
@@ -1361,6 +1414,30 @@ Indexes:
 
 ## Notifications
 
+### `immediate_action_deliveries`
+
+| Column | Type | Null | Default | Key |
+| --- | --- | --- | --- | --- |
+| `id` | bigint | no |  | PK |
+| `submission_id` | bigint | no |  | FK |
+| `actor_user_id` | bigint | no |  | FK |
+| `client_uuid` | char(36) | no |  | UK |
+| `actions_json` | longtext | no |  |  |
+| `description` | text | no |  |  |
+| `written_at` | datetime | yes |  |  |
+| `created_at` | datetime | no | current_timestamp() |  |
+
+References:
+
+- `actor_user_id` → `users.id`
+- `submission_id` → `submissions.id` (on delete cascade)
+
+Indexes:
+
+- `fk_immediate_delivery_actor` on `actor_user_id`
+- `ix_immediate_delivery_submission` on `submission_id, created_at`
+- `uq_immediate_delivery_client` on `client_uuid` (unique)
+
 ### `incident_notifications`
 
 | Column | Type | Null | Default | Key |
@@ -1825,82 +1902,3 @@ Indexes:
 - `idx_terrain_cross_sections_created_by` on `created_by_user_id`
 - `idx_terrain_cross_sections_project` on `caltrans_project_id, updated_at`
 - `uk_terrain_cross_sections_key` on `cross_section_key` (unique)
-
-## Other
-
-### `delegated_actions`
-
-| Column | Type | Null | Default | Key |
-| --- | --- | --- | --- | --- |
-| `id` | bigint | no |  | PK |
-| `delegation_id` | bigint | no |  | FK |
-| `actor_user_id` | bigint | no |  | FK |
-| `acting_for_user_id` | bigint | no |  | FK |
-| `method` | varchar(8) | no |  |  |
-| `path` | varchar(255) | no |  |  |
-| `created_at` | datetime | no | current_timestamp() |  |
-
-References:
-
-- `acting_for_user_id` → `users.id` (on delete cascade)
-- `actor_user_id` → `users.id` (on delete cascade)
-- `delegation_id` → `user_delegations.id` (on delete cascade)
-
-Indexes:
-
-- `fk_delegated_action_actor` on `actor_user_id`
-- `fk_delegated_action_for` on `acting_for_user_id`
-- `ix_delegated_action_delegation` on `delegation_id, created_at`
-
-### `immediate_action_deliveries`
-
-| Column | Type | Null | Default | Key |
-| --- | --- | --- | --- | --- |
-| `id` | bigint | no |  | PK |
-| `submission_id` | bigint | no |  | FK |
-| `actor_user_id` | bigint | no |  | FK |
-| `client_uuid` | char(36) | no |  | UK |
-| `actions_json` | longtext | no |  |  |
-| `description` | text | no |  |  |
-| `written_at` | datetime | yes |  |  |
-| `created_at` | datetime | no | current_timestamp() |  |
-
-References:
-
-- `actor_user_id` → `users.id`
-- `submission_id` → `submissions.id` (on delete cascade)
-
-Indexes:
-
-- `fk_immediate_delivery_actor` on `actor_user_id`
-- `ix_immediate_delivery_submission` on `submission_id, created_at`
-- `uq_immediate_delivery_client` on `client_uuid` (unique)
-
-### `user_delegations`
-
-| Column | Type | Null | Default | Key |
-| --- | --- | --- | --- | --- |
-| `id` | bigint | no |  | PK |
-| `delegator_user_id` | bigint | no |  | FK |
-| `delegate_user_id` | bigint | no |  | FK |
-| `starts_on` | date | no |  |  |
-| `ends_on` | date | no |  |  |
-| `note` | varchar(500) | yes |  |  |
-| `created_by_user_id` | bigint | no |  | FK |
-| `created_at` | datetime | no | current_timestamp() |  |
-| `cancelled_at` | datetime | yes |  |  |
-| `cancelled_by_user_id` | bigint | yes |  | FK |
-
-References:
-
-- `cancelled_by_user_id` → `users.id` (on delete set null)
-- `created_by_user_id` → `users.id`
-- `delegate_user_id` → `users.id` (on delete cascade)
-- `delegator_user_id` → `users.id` (on delete cascade)
-
-Indexes:
-
-- `fk_delegation_canceller` on `cancelled_by_user_id`
-- `fk_delegation_creator` on `created_by_user_id`
-- `ix_delegation_delegate` on `delegate_user_id, starts_on, ends_on`
-- `ix_delegation_delegator` on `delegator_user_id, starts_on, ends_on`

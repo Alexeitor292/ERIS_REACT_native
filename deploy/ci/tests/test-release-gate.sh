@@ -37,7 +37,7 @@ case "$image" in
     while [[ $# -gt 0 ]]; do [[ "$1" == --output ]] && out="$2"; shift; done
     if [[ "$args" == *"--format cyclonedx"* ]]; then echo '{"bomFormat":"CycloneDX"}' > "$(host "$out")"; exit 0; fi
     if [[ "$args" == *"--exit-code 1"* ]]; then
-      [[ "$args" == *"--ignore-unfixed"* && "$args" == *"--scanners vuln,secret"* ]] || exit 98
+      [[ "$args" != *"--ignore-unfixed"* && "$args" == *"--scanners vuln,secret"* ]] || exit 98
       echo '{"Results":[]}' > "$(host "$out")"
       exit "${STUB_VULNERABLE:-0}"
     fi
@@ -62,7 +62,9 @@ check "its CycloneDX SBOM is kept for the release" -- grep -q CycloneDX "$work/o
 check "its scan report is kept" -- test -f "$work/out/api.vulns.json"
 check "the scan reads a saved archive, not a registry" -- grep -q "image --input /work/image.tar" "$STUB_LOG"
 check "accepted exceptions come from .trivyignore" -- grep -q "ignorefile /policy/.trivyignore" "$STUB_LOG"
-STUB_VULNERABLE=1 check "a fixable HIGH/CRITICAL vulnerability or secret fails the gate" -- bash -c '! "$0" scan localhost/eris/web:1 web "$1" > /dev/null 2>&1' "$SCRIPT" "$work/out"
+check "all severities are checked by default" -- grep -q -- "--severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL" "$STUB_LOG"
+check "unfixed vulnerabilities are not suppressed" -- bash -c '! grep -q -- "--ignore-unfixed" "$0"' "$STUB_LOG"
+STUB_VULNERABLE=1 check "a known vulnerability or secret fails the gate" -- bash -c '! "$0" scan localhost/eris/web:1 web "$1" > /dev/null 2>&1' "$SCRIPT" "$work/out"
 check "the failing report is still kept for review" -- test -f "$work/out/web.vulns.json"
 TRIVY_DB_REPOSITORY=harbor.test/mirror/trivy-db check "the vulnerability database can come from Harbor" -- \
   run scan localhost/eris/worker:1 worker "$work/out"

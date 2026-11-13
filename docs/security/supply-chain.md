@@ -23,13 +23,13 @@ flowchart LR
 
 | Step | Where | Fails the release when |
 | --- | --- | --- |
-| Pull request checks | GitHub Actions `ci.yml`, `docs.yml` | Any test, type check, migration or docs check fails, or `dependency-audit` finds a known vulnerability (`pip-audit`, `npm audit --audit-level=high`) |
+| Pull request checks | GitHub Actions `ci.yml`, `docs.yml` | Any test, type check, migration or docs check fails, or `dependency-audit` finds a known vulnerability (`pip-audit`, `npm audit --audit-level=low`) |
 | Validate | Stage *Validate* | A shell script has a syntax error, or the deployment and release-gate script tests (stub Podman) fail |
 | Build | Stage *Build* | An image fails to build or the API code fails to compile |
 | Security tests | Stage *Backend security checks* | Any session, Entra, route-guard, handover or push test fails inside the image that will ship |
-| SBOM and gate | Stage *SBOM and vulnerability gate*, `deploy/ci/release-gate.sh scan` | A HIGH or CRITICAL vulnerability **with a fix available**, or an embedded secret, not listed in `.trivyignore` |
+| SBOM and gate | Stage *SBOM and vulnerability gate*, `deploy/ci/release-gate.sh scan` | A HIGH or CRITICAL vulnerability **including findings without a published fix**, or an embedded secret, not listed in `.trivyignore` |
 | Publish, sign, attest | Stage *Publish, sign and attest* | Push, signing or the verification of the signature fails |
-| Staging deploy | `deploy-hook.sh` → `eris-pod.sh release` | Signature policy rejects a pull; migration, health or verification fails (automatic rollback) |
+| Staging deploy | `deploy-hook.sh` â†’ `eris-pod.sh release` | Signature policy rejects a pull; migration, health or verification fails (automatic rollback) |
 | Production deploy | Same, after a named approver in Jenkins | Same |
 
 Nothing is pushed to Harbor before the gate passes, so a failed scan publishes
@@ -41,7 +41,7 @@ nothing.
 | --- | --- |
 | `release/sbom/<image>.cdx.json` | CycloneDX SBOM of every package in the image (five images) |
 | `release/sbom/<image>.vulns.json` | Trivy findings at the gate severity, after exceptions |
-| `release/<image>.ref` | `harbor…/eris/<image>@sha256:…` |
+| `release/<image>.ref` | `harborâ€¦/eris/<image>@sha256:â€¦` |
 | `release/cosign.pub` | The public key the hosts trust |
 | `release/release-images.env` | The five digests and `ERIS_REQUIRE_DIGESTS=true`: the release file the hosts consume |
 
@@ -79,7 +79,7 @@ input (size-limited) and runs `eris-pod.sh release` with it.
 
 ## Vulnerability exceptions
 
-The gate fails on fixable HIGH and CRITICAL findings. When a fix is not yet
+The gate defaults to all severities, including findings without a published fix. When a fix is not yet
 possible, an exception may be added to [`.trivyignore`](../../.trivyignore):
 
 1. Confirm the finding is real for ERIS (is the vulnerable code reachable?).
@@ -96,17 +96,17 @@ possible, an exception may be added to [`.trivyignore`](../../.trivyignore):
 4. The change goes through a pull request like any code.
 5. At every release, remove expired entries. An expired entry is a finding.
 
-Unfixed vulnerabilities (no fix published) do not fail the gate but appear in
-the `vulns.json` report; review them monthly
+Unfixed vulnerabilities also fail the default gate. Any accepted exception needs
+explicit security approval and an expiry; review findings and exceptions at every release and monthly
 ([maintenance calendar](../handover/README.md#recurring-maintenance-calendar)).
 
 ## Dependencies
 
 | Ecosystem | Manifest | Lock | How to update |
 | --- | --- | --- | --- |
-| Python (API, worker) | `backend/requirements.txt` | Pinned versions in the file | [Dependency updates](../development/conventions.md#dependency-updates) |
+| Python (API, worker) | `backend/requirements.txt` | `backend/constraints.txt` pins the API/worker resolution; built-image SBOM records it | [Dependency updates](../development/conventions.md#dependency-updates) |
 | JavaScript (web) | `web/package.json` | `web/package-lock.json` | `npm ci` in CI; update with `npm install <pkg>@<version>` |
-| Swift (iPhone) | `ios/` Swift Package Manager (branch `claude/ios-swift-app`) | `Package.resolved` | Xcode → Update to latest package versions; MSAL from Microsoft only |
+| Swift (iPhone) | `ios/` Swift packages pinned in `project.yml` on main | `Package.resolved` | Xcode â†’ Update to latest package versions; MSAL from Microsoft only |
 | Base images | `backend/Dockerfile`, `backend/Dockerfile.worker`, `web/Dockerfile` | Pinned tags; production pins digests | Rebuild monthly to pick up OS patches |
 | Third-party runtime images | MariaDB, SeaweedFS | Mirrored into Harbor by IT | IT mirrors a new version; Jenkins scans and signs it |
 | Pipeline tools | Trivy, cosign | Pinned in `release-gate.sh` | Mirror into Harbor, update `TRIVY_IMAGE` / `COSIGN_IMAGE` |

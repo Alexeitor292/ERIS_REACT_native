@@ -43,7 +43,7 @@ The backend and worker receive every variable in `deploy/compose/.env.proxmox` (
 `env_file`). The web app's `VITE_*` values are **build arguments**: they are
 baked into the image, so changing one means rebuilding `web`.
 
-All commands below run from the repository's `docker/` directory. To keep them
+All commands below run from the repository's `deploy/compose/` directory. To keep them
 short, define:
 
 ```bash
@@ -65,7 +65,7 @@ alias dc='docker compose --env-file .env.proxmox -f docker-compose.yml -f docker
 
    ```bash
    git clone <repository-url> /opt/eris
-   cd /opt/eris/docker
+   cd /opt/eris/deploy/compose
    cp .env.proxmox.example .env.proxmox
    ```
 
@@ -206,7 +206,7 @@ Release notes that need action:
   with "Event Group" in them are renamed. API paths and tables are unchanged.
 - **Sharing through the chiefs** (`20260929_share_approvals`). Sharing a
   technical form now gives viewing and editing, and goes through the branch and
-  office chiefs (see roles-and-identity.md). Adds `submission_shares` and
+  office chiefs (see ../security/roles-and-permissions.md). Adds `submission_shares` and
   `submission_share_reviews`. Existing grants are left as they are.
 - **No role without its place** (`20260930_roles_from_org`). Every account's
   roles become exactly what its place in an office tree or a district list gives
@@ -298,38 +298,42 @@ To rehearse an update on staging, restore a production backup there first.
 
 ## HTTPS and a reverse proxy
 
-Browsers and phones must reach three things: the web app (5173), the API (8000)
-and SeaweedFS's API (9800), because file links point straight at SeaweedFS. Put a TLS
-reverse proxy in front with one hostname for each. With Caddy:
+Browsers use one origin for the app and `/api`. In Compose, the web image's
+nginx forwards `/api/` to the `backend:8000` service (Podman uses shared
+loopback instead). Signed files use their own HTTPS hostname. With Caddy:
 
 ```caddyfile
 eris.example.gov {
-  reverse_proxy <eris-server>:5173
+  reverse_proxy 127.0.0.1:5173
 }
-api.eris.example.gov {
-  reverse_proxy <eris-server>:8000
-}
-files.eris.example.gov {
-  reverse_proxy <eris-server>:9800
+eris-files.example.gov {
+  reverse_proxy 127.0.0.1:9800
 }
 ```
 
-Caddy obtains certificates automatically. Behind Cloudflare or an internal
-certificate authority, give each site a `tls <cert> <key>` line instead. Then
-set, in `.env.proxmox`:
+The proxy must preserve the S3 Host, path and query. Set in `.env.proxmox`:
 
 ```env
-VITE_API_BASE_URL=https://api.eris.example.gov
-VITE_API_BASE=https://api.eris.example.gov
+VITE_API_BASE_URL=/api
+VITE_API_BASE=/api
 CORS_ORIGINS=https://eris.example.gov
-S3_PUBLIC_ENDPOINT=https://files.eris.example.gov
+S3_PUBLIC_ENDPOINT=https://eris-files.example.gov
 WEB_BASE_URL=https://eris.example.gov
+API_DOCS_ENABLED=false
+API_BIND=127.0.0.1
+WEB_BIND=127.0.0.1
 ```
 
-and rebuild: `dc up -d --build`. Expose only the proxy's ports 80 and 443 to
-users; do not forward 8000, 5173 or 9800 from outside. Set `API_BIND` and
-`WEB_BIND` to the address the proxy connects to if the ERIS server has other
-networks.
+Rebuild with `dc up -d --build`. Expose only gateway HTTPS to users; firewall
+8000, 5173 and 9800. The base Compose file publishes S3 on all interfaces, so
+host firewall rules are required. A remote proxy needs private-interface binds
+and a source-IP firewall rule. `ENV=prod` requires HTTPS `WEB_BASE_URL` and a
+strong signing key; the old plain-HTTP/IP examples are not a production setup.
+
+Caltrans uses the [Podman runbook](caltrans-podman.md) for certificate mounts,
+Entra-only sign-in, signed releases and recovery. This Compose example defaults
+to password login for rehearsal; it does not satisfy Caltrans production
+acceptance without those additional controls.
 
 ## Email
 
@@ -338,7 +342,7 @@ notice is sent right after each approval and retried at every backend start. To
 also retry on a schedule, add a cron entry on the host:
 
 ```bash
-*/15 * * * * cd /opt/eris/docker && docker compose --env-file .env.proxmox -f docker-compose.yml -f docker-compose.proxmox.yml exec -T backend python -m app.tools.flush_email_outbox
+*/15 * * * * cd /opt/eris/deploy/compose && docker compose --env-file .env.proxmox -f docker-compose.yml -f docker-compose.proxmox.yml exec -T backend python -m app.tools.flush_email_outbox
 ```
 
 ## Monitoring
@@ -351,27 +355,7 @@ also retry on a schedule, add a cron entry on the host:
 
 ## Mobile app releases
 
-The mobile app is built with EAS (`mobile/eas.json`):
-
-| Profile | Use | EAS environment |
-| --- | --- | --- |
-| `development` | Development client for engineers | — |
-| `preview` | Internal testers, pointed at staging | `preview` |
-| `production` | App Store builds | `production` |
-
-Set the API address for each environment before building, because it is baked
-into the app:
-
-```bash
-cd mobile
-eas env:create --environment production --name EXPO_PUBLIC_API_URL --value https://api.eris.example.gov
-eas env:create --environment production --name EXPO_PUBLIC_WEB_URL --value https://eris.example.gov
-eas build --profile production --platform ios
-eas submit --profile production --platform ios
-```
-
-Use the `preview` environment and profile the same way for staging builds. A
-build without `EXPO_PUBLIC_API_URL` cannot reach any server.
+Build the native Swift iOS app with Xcode and distribute through Intune. See [iOS](../development/ios.md). Expo/EAS releases are retired.
 
 ## Production checklist
 
@@ -384,9 +368,11 @@ build without `EXPO_PUBLIC_API_URL` cannot reach any server.
       match the real addresses.
 - [ ] HTTPS in front; only ports 80 and 443 reachable from users' networks.
 - [ ] No file from `database/dev/` loaded; the first administrator made with
-      `create_admin`.
+      `create_admin`; agency deployments additionally require Entra-only sign-in
+      and two linked administrators (use the Podman runbook).
 - [ ] `VITE_ARCGIS_API_KEY` restricted to the web app's origin, if used.
 - [ ] `SMTP_*` configured, if Maintenance should get approval emails.
 - [ ] Daily database and SeaweedFS backups, copied off the server, and a restore
       tried once.
-- [ ] Mobile builds made with `EXPO_PUBLIC_API_URL` pointing at this server.
+- [ ] Native iOS `ERIS_API_BASE_URL` points to this server's HTTPS `/api`;
+      agency signing, Entra and device acceptance completed.

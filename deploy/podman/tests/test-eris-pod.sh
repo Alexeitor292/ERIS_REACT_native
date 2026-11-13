@@ -210,6 +210,8 @@ rmdir "$CONF/.release.lock"
 
 : > "$STATE/pulled"
 expect_ok "a good release goes live" bash "$SCRIPT" release "$work/good.env"
+check "the API drops all capabilities and refuses privilege escalation" -- grep -q -- '--name eris-api.*--cap-drop=ALL --security-opt=no-new-privileges' "$STATE/calls"
+check "the worker drops all capabilities and refuses privilege escalation" -- grep -q -- '--name eris-worker.*--cap-drop=ALL --security-opt=no-new-privileges' "$STATE/calls"
 check "it pulled all five new digests first" -- test "$(grep -c '@sha256:' "$STATE/pulled")" = 5
 check "it took a pre-release backup" -- bash -c 'ls "$0"/pre-release-*/manifest.env >/dev/null' "$work/release-backups"
 check "the new images are installed" -- cmp -s "$work/good.env" "$CONF/images.env"

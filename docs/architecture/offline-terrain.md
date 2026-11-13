@@ -59,8 +59,8 @@ The Compose stack runs the standard worker
 is the Esri variant, which needs `ARCGIS_RUNTIME_ENABLED=true` and an
 `ARCGIS_API_KEY`.
 
-The phone renders packages with native iOS SceneKit screens
-(`mobile/plugins/arcgis-ios/`); there is no Android equivalent. The web app's
+The Swift iOS app renders packages through its native terrain views in
+`ios/ERIS/Views/TerrainViews.swift`; there is no Android equivalent. The web app's
 3D terrain views are separate, online scenes that show Esri World Elevation; values
 that get saved come from USGS (see [map licensing](../operations/map-licensing.md)).
 

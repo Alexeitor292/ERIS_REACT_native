@@ -27,7 +27,7 @@ schema compatibility; their values are ordinary S3 bucket names.
    ```
 
 3. Start a temporary SeaweedFS instance using the **new persistent volume** and
-   a separate localhost port. From `docker/`, load the edited environment first:
+   a separate localhost port. From `deploy/compose/`, load the edited environment first:
 
    ```bash
    set -a; . ./.env.proxmox; set +a
@@ -65,7 +65,7 @@ schema compatibility; their values are ordinary S3 bucket names.
    mismatched object before proceeding.
 
 5. Stop the temporary instance, stop the old MinIO container to release port
-   9800, and start the new stack from `docker/`:
+   9800, and start the new stack from `deploy/compose/`:
 
    ```bash
    docker stop eris_seaweedfs_transfer

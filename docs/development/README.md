@@ -33,7 +33,6 @@ flowchart LR
 | [Backend](backend.md) | API layout, request handling, guards, adding endpoints and settings, tools |
 | [Web](web.md) | React app layout, sessions in the browser, roles in the UI, styling, adding a page |
 | [iOS (Swift)](ios.md) | Native iPhone app: MSAL, APNs, Intune delivery, build specification |
-| [Expo app (reference)](mobile-expo.md) | The React Native app being replaced |
 | [Testing](testing.md) | Every suite, CI jobs, writing tests |
 | [Conventions](conventions.md) | Branches, pull requests, style, documentation, dependency updates |
 | [Migrations](../data/migrations.md) | Changing the database schema |
@@ -46,8 +45,7 @@ flowchart TB
     subgraph repo["Repository"]
         backend["backend/<br/>FastAPI API, worker,<br/>migrations, tests"]
         web["web/<br/>React SPA + nginx config"]
-        ios["ios/<br/>Swift app + ERISKit<br/>(branch claude/ios-swift-app)"]
-        mobile["mobile/<br/>Expo app (reference)"]
+        ios["ios/<br/>Swift app + ERISKit"]
         database["database/<br/>init SQL, dev mock accounts"]
         deploy["deploy/<br/>podman (production),<br/>ci (Jenkins, release gate),<br/>compose (development)"]
         scripts["scripts/docs/<br/>doc generators and checks"]
@@ -56,14 +54,13 @@ flowchart TB
     end
     web -->|"/api"| backend
     ios -->|"/api"| backend
-    mobile -->|"/api"| backend
     backend --> database
     deploy --> backend
     deploy --> web
     scripts --> docs
 ```
 
-## How do I…
+## How do Iâ€¦
 
 | Task | Where |
 | --- | --- |
@@ -85,6 +82,6 @@ flowchart TB
 | Git | any recent | Source control |
 | Docker Desktop (or Podman) | recent | MariaDB, SeaweedFS, Adminer locally |
 | Python | 3.12 | API, worker, doc scripts |
-| Node.js | 22 (as CI) | Web app, Expo app |
-| VS Code (suggested) | — | Python, ESLint, Tailwind, Mermaid preview extensions |
+| Node.js | 22 (as CI) | Web app |
+| VS Code (suggested) | â€” | Python, ESLint, Tailwind, Mermaid preview extensions |
 | Xcode | 16+ on macOS | iPhone app only |

@@ -151,7 +151,7 @@ export default function IncidentLocationInput({
   const streetViewPoint = value ?? pin;
 
   return (
-    <fieldset className="grid min-w-0 content-start gap-3" disabled={disabled} aria-labelledby={`${id}-title`}>
+    <fieldset className="grid min-w-0 content-start gap-3" disabled={disabled} aria-labelledby={`${id}-title`} data-location-resolved={value != null} aria-busy={busy}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span id={`${id}-title`} className="text-sm font-semibold">Where is it? <span className="text-[var(--bad)]" aria-hidden>*</span></span>
         <div role="radiogroup" aria-label="How to enter the location" className="inline-flex overflow-hidden rounded-lg border border-[var(--line)] text-[13px]">
@@ -251,6 +251,7 @@ export default function IncidentLocationInput({
             <button type="submit" disabled={busy} className="inline-flex items-center gap-1.5 rounded-md border border-[var(--brand)] px-3 py-1.5 text-sm font-semibold text-[var(--brand)] hover:bg-[color:color-mix(in_oklab,var(--brand)_8%,var(--panel))] disabled:opacity-50">
               <MapPin size={15} aria-hidden /> Find its post mile
             </button>
+            <p className="mt-2 text-xs text-muted">Choose Find its post mile to confirm this location before sending the report.</p>
           </div>
         </form>
       ) : null}

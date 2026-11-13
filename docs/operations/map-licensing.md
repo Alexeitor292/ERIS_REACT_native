@@ -1,5 +1,11 @@
 # Map and elevation licensing
 
+**November 13, 2026 update:** use the [complete licensing bill of materials](../caltrans/licensing-bill-of-materials.md)
+for the 300-mobile-installation planning case, Apple/Intune/Microsoft costs and
+procurement decisions. The source-specific rules below remain useful. The
+public E300 terms are now dated November 10, 2026; the November 4 research below
+used an earlier revision. Caltrans's signed agreement still needs review.
+
 What ERIS needs from Esri and others to run in production, and the rules the code keeps to.
 Researched on 2026-11-04 against Esri's public Master Agreement (revised 2026-08-14) and
 Product-Specific Terms E300 (2025-11-13). **Caltrans's signed Esri agreement overrides these
@@ -15,11 +21,16 @@ CTDATA before any of this is treated as final.
 | Creator-level account with a custom role, to own the keys | 1, may be an existing one | No |
 | Per-person ArcGIS accounts | 0, while the rules below hold | No |
 | Paid SDK deployment packs | 0, while the rules below hold | No |
-| ArcGIS Pro, to publish an offline basemap (`ARCGIS_MMPK_URL`) | 0, or 1 if publishing one | No |
+| ArcGIS Pro and potentially Publisher extension, to publish an anonymous-use offline basemap (`ARCGIS_MMPK_URL`) | Existing author entitlement, or 1 author plus applicable extension | No |
 | Google Maps Embed key for Street View, optional. Free and unlimited | 0 or 1 | No |
 
 Enterprise's API key documentation does not list Esri's hosted location services, so the keys
 come from ArcGIS Online.
+
+Credential counts above are the earlier minimum, not a requirement to share
+one key across environments. Prefer separate web/native × staging/production
+credential sets. A `.mmpk` must have Lite-compatible layers **and** allow its
+intended non-ArcGIS-signed-in users; confirm Publisher authoring requirements.
 
 ## Rules the code keeps to
 

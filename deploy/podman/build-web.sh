@@ -29,6 +29,7 @@ podman run --rm --network none \
   -e VITE_API_BASE_URL=/api -e VITE_API_BASE=/api \
   -e VITE_ENTRA_ENABLED="$entra_enabled" \
   -e VITE_LOCAL_LOGIN_ENABLED="$local_login_enabled" \
+  -e VITE_GUIDED_DEMO_ENABLED="${VITE_GUIDED_DEMO_ENABLED:-false}" \
   -e VITE_ARCGIS_API_KEY="${VITE_ARCGIS_API_KEY:-}" \
   -e VITE_GOOGLE_MAPS_EMBED_KEY="${VITE_GOOGLE_MAPS_EMBED_KEY:-}" \
   -v "$scratch/dist:/app/dist:Z" \

@@ -2,8 +2,8 @@
 
 The Caltrans ERIS iPhone app: SwiftUI, Microsoft Entra sign-in through MSAL and
 Microsoft Authenticator, APNs push. The build contract is
-[docs/ios-native-app.md](../docs/development/ios.md); the Expo app in
-[`mobile/`](../mobile) is the reference until this app reaches parity.
+[iOS build specification](../docs/development/ios.md). Mobile development uses
+this Swift project exclusively; the retired React Native/Expo project has been removed.
 
 | Folder | What it is |
 | --- | --- |
@@ -13,7 +13,7 @@ Microsoft Authenticator, APNs push. The build contract is
 
 ## On the Caltrans Mac (Xcode only, no other tools)
 
-1. `git pull` the `claude/ios-swift-app` branch and open `ios/ERIS.xcodeproj`.
+1. `git pull --ff-only` the accepted `main` branch and open `ios/ERIS.xcodeproj`.
 2. Signing is set in `project.yml`, not in Xcode's signing pane (the project is
    regenerated from it): Debug and Staging use the Campos Labs team
    (`DEVELOPMENT_TEAM`) and `org.camposlabs.eris`; Release is signed by Caltrans as
@@ -70,9 +70,9 @@ line-of-business app (see the spec for renewal dates).
 | Role rules (`roleModel.ts`) with tests | Ported |
 | The app's shape | A narrow tool, not the web portal: each person gets the tabs their job needs (`AppTab`) and nothing to browse. My Work for anyone with steps waiting or a form shared with them; Report for maintenance reporters; Notifications and Account for everyone. Records are read on the web |
 | Who gets the app | Anyone placed in an office or on a district's list, anyone with a step in a district's maintenance workflow, and administrators. The server refuses everyone else on every request (`services/app_access.py`) and the app signs them out, keeping what it held. It reads the person's place again when it comes back and after each round, so tabs and queue follow a change of role without restarting |
-| Out of office and moving work | Account › Out of office names someone to act for you between two dates; a person acting sees a banner, and what they keep on the iPhone sits apart from their own. Chiefs have **Move work** in My Work (`docs/organization.md`) |
+| Out of office and moving work | Account › Out of office names someone to act for you between two dates; a person acting sees a banner, and what they keep on the iPhone sits apart from their own. Chiefs have **Move work** in My Work ([organization guide](../docs/user-guides/administration.md)) |
 | Opening and reading | The Expo app's opening animation plays at each launch (shorter with Reduce Motion). Account › Text sets the app's own text size, up to the largest accessibility sizes, and Bold Text; by default it follows the iPhone. The memo editor's web page and the map's labels do not follow it |
-| District Contact and Immediate Actions | See `docs/workflows.md`. A hand-off names a contact, starting on the district's default; the form's Actions deliver immediate actions from a draft, kept on the iPhone and sent when there is no connection |
+| District Contact and Immediate Actions | See [workflows](../docs/architecture/workflows.md). A hand-off names a contact, starting on the district's default; the form's Actions deliver immediate actions from a draft, kept on the iPhone and sent when there is no connection |
 | Report: report an incident (GPS + Caltrans postmile + photos and videos from the camera or library, videos sent as 720p MP4) and follow one's own reports, read only; a report sent back for more information is answered from My Work | Ported; needs device test. The general incident list and the Expo app's claim/forward/resolve are gone: triage is done in My Work |
 | Notifications feed | Ported |
 | Forms: no tab of their own. A technical form opens from its assessment in My Work; My Work also lists forms in progress shared with the person, their own on no assessment, and any with changes still to send. Each opens in the GISA editor | Ported. The GISA PDF export is retired (2026-10-28) and not ported |
@@ -106,8 +106,6 @@ line-of-business app (see the spec for renewal dates).
   (`web/public/eris-logo.svg`) rendered on its yellow, edge to edge, by
   `swift ios/scripts/render-app-icon.swift web/public/eris-logo.svg ios/ERIS/Assets.xcassets/AppIcon.appiconset/AppIcon.png 1024`.
   Rerun it if the logo changes.
-- **Parity fixtures.** `node ios/scripts/make-parity-fixtures.mjs` (Node 22.18+) runs the Expo app's
-  TypeScript helpers and writes `ERISKit/Tests/ERISKitTests/Fixtures/gisa-helpers.json`; the Swift
-  tests check the ports against it. Rerun it when those TypeScript files change.
-- The server contract is `docs/ios-native-app.md`; never put a token in a URL, and
+- **Parity fixtures.** The committed `ERISKit/Tests/ERISKitTests/Fixtures/` files preserve the migration baseline. Maintain these fixtures alongside the native Swift tests. The Expo-based fixture generator was retired with the React Native project.
+- The server contract is [the iOS specification](../docs/development/ios.md); never put a token in a URL, and
   decode GISA forms with `preservingKeys: true`.

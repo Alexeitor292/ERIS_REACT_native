@@ -1,5 +1,5 @@
 # Accepted vulnerability exceptions for the ERIS release gate (deploy/ci/release-gate.sh).
-# The gate fails on fixable HIGH/CRITICAL vulnerabilities and on embedded secrets.
+# The gate defaults to all known vulnerability severities and embedded secrets.
 # Add an exception only with security approval, one ID per line, and a comment
 # giving the reason, the approver and an expiry date, for example:
 #

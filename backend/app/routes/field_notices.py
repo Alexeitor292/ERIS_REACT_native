@@ -75,7 +75,8 @@ def supervisors_of(db: Session, assessment: dict | None) -> list[int]:
 
 def notice_text(labels: list[str], description: str, written_at: datetime | None, sent_at: datetime) -> str:
     late = written_at is not None and (sent_at - written_at).total_seconds() > LATE_AFTER_SECONDS
-    written = f" Written {written_at:%b} {written_at.day}, {written_at:%-I:%M %p}, with no connection." if late else ""
+    # %-I is POSIX-only; keep local Windows development consistent with Linux.
+    written = f" Written {written_at:%b} {written_at.day}, {written_at.strftime('%I:%M %p').lstrip('0')}, with no connection." if late else ""
     return f"{', '.join(labels)}. {description}{written}"[:1000]
 
 

@@ -1,0 +1,4758 @@
+{
+  "errors": [],
+  "generated_at": "2026-11-13T19:48:41Z",
+  "metrics": {
+    "_totals": {
+      "CONFIDENCE.HIGH": 21,
+      "CONFIDENCE.LOW": 98,
+      "CONFIDENCE.MEDIUM": 4,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 18,
+      "SEVERITY.MEDIUM": 105,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 32253,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\__init__.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 0,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\admin_users.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 3,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 3,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 585,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\asgi.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 53,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\auth.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 16,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\config.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 1,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 1,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 235,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\constants\\__init__.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 0,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\constants\\gisa_lookups.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 59,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\db.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 16,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\deps.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 135,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\dev_routes.py": {
+      "CONFIDENCE.HIGH": 1,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 1,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 64,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\entra.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 1,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 1,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 253,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\entra_credential.py": {
+      "CONFIDENCE.HIGH": 1,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 1,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 88,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\main.py": {
+      "CONFIDENCE.HIGH": 4,
+      "CONFIDENCE.LOW": 7,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 3,
+      "SEVERITY.MEDIUM": 8,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 2160,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\migrations_check.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 40,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\permissions.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 24,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\photos.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 275,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\precision.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 41,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\rate_limit.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 76,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\roles.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 108,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\__init__.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 28,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\arcgis.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 23,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\assessments.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 5,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 5,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 2204,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\auth.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 1,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 1,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 143,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\cracks.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 2,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 2,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 350,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\delegations.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 62,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\drone_surveys.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 1,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 1,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 315,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\elevation_tiles.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 21,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\event_group_lifecycle.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 116,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\event_groups.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 2,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 2,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 623,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\field_notices.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 118,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\form_presence.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 50,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\gisa.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 31,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\incident_approval.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 255,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\incident_classification.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 1,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 1,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 172,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\incidents.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 11,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 11,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 2524,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\maintenance_workflows.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 214,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\mission_center_event_groups.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 1,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 1,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 57,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\mission_center_gis.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 1,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 1,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 231,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\notifications.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 72,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\org.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 12,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 12,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 1270,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\org_tree.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 148,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\photo_exports.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 88,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\photo_map.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 386,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\project_lifecycle.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 116,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\projects.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 2,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 2,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 516,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\road_inventory.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 425,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\road_inventory_mobile_download.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 56,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\sharing.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 118,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\site_history.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 3,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 3,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 292,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\terrain_cross_sections.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 1,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 1,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 424,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\user_layouts.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 1,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 1,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 164,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\routes\\workflow_tree.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 72,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\schemas\\__init__.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 0,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\schemas\\common.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 285,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\__init__.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 0,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\apns.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 103,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\app_access.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 21,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\caltrans_postmile_reference.py": {
+      "CONFIDENCE.HIGH": 1,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 1,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 145,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\delegations.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 5,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 5,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 342,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\district_contact.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 1,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 1,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 150,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\elevation_profile.py": {
+      "CONFIDENCE.HIGH": 1,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 1,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 221,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\elevation_tiles.py": {
+      "CONFIDENCE.HIGH": 2,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 1,
+      "SEVERITY.MEDIUM": 1,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 97,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\field_media_ingest.py": {
+      "CONFIDENCE.HIGH": 2,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 2,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 274,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\field_media_quality.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 54,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\form_access.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 5,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 5,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 95,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\form_presence.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 2,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 2,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 154,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\form_saves.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 128,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\gisa_validation.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 26,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\incident_name.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 50,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\maintenance_workflows.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 2,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 2,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 210,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\notification_feed.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 1,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 1,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 309,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\notifications.py": {
+      "CONFIDENCE.HIGH": 3,
+      "CONFIDENCE.LOW": 1,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 3,
+      "SEVERITY.MEDIUM": 1,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 379,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\office_routing.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 53,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\offline_scene.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 310,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\offline_scene_builder.py": {
+      "CONFIDENCE.HIGH": 1,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 1,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 962,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\offline_scene_caltrans.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 723,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\offline_scene_catalog.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 142,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\offline_scene_context.py": {
+      "CONFIDENCE.HIGH": 1,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 1,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 1193,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\offline_scene_dem.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 653,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\offline_scene_esri_builder.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 186,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\offline_scene_esri_elevation.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 341,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\offline_scene_imagery.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 583,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\offline_scene_jobs.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 7,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 7,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 319,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\offline_scene_terrain.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 484,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\org_directory.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 1,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 1,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 603,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\org_tree.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 4,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 4,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 669,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\photo_metadata_export.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 86,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\public_visibility.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 6,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 6,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 214,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\push.py": {
+      "CONFIDENCE.HIGH": 1,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 1,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 140,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\rich_text.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 113,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\road_corridor_pairing.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 877,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\road_cross_section_build.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 177,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\road_inventory_import_jobs.py": {
+      "CONFIDENCE.HIGH": 1,
+      "CONFIDENCE.LOW": 1,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 1,
+      "SEVERITY.MEDIUM": 1,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 220,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\road_inventory_lookup.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 112,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\road_inventory_packages.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 201,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\road_inventory_parser.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 225,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\road_role.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 138,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\road_route_chains.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 292,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\roadway_context.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 166,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\share_rules.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 79,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\sharing.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 6,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 6,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 535,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\terrain_grid.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 227,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\services\\workflow_tree.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 1,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 1,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 405,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\sessions.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 141,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\storage.py": {
+      "CONFIDENCE.HIGH": 1,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 1,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 207,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\storage_bootstrap.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 54,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\timezones.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 24,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\tools\\__init__.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 1,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\tools\\adopt_existing_admin.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 44,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\tools\\bootstrap_initial_admin.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 64,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\tools\\create_admin.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 1,
+      "CONFIDENCE.MEDIUM": 1,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 1,
+      "SEVERITY.MEDIUM": 1,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 170,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\tools\\entra_credential_check.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 38,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\tools\\flush_email_outbox.py": {
+      "CONFIDENCE.HIGH": 1,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 1,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 90,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\tools\\handover_status.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 114,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\tools\\migrate_object_storage.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 98,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\tools\\offline_scene_alignment.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 486,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\tools\\prepare_database.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 1,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 1,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 20,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\user_metadata.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 44,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\worker\\__init__.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 0,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\worker\\offline_scene_worker.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 251,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "backend/app\\worker\\offline_scene_worker_esri.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 24,
+      "nosec": 0,
+      "skipped_tests": 0
+    }
+  },
+  "results": [
+    {
+      "code": "290         text(\n291             f\"\"\"\n292             SELECT DISTINCT u.id\n293             FROM users u\n294             JOIN user_roles ur ON ur.user_id = u.id\n295             JOIN roles r ON r.id = ur.role_id\n296             {org_directory.USER_ORG_JOIN_SQL}\n297             WHERE u.is_active = 1\n298               AND r.name IN ({role_placeholders})\n299               {office_filter}\n300             ORDER BY\n301               CASE WHEN {office_code_sql} = :office_code THEN 0 ELSE 1 END,\n302               u.full_name ASC,\n303               u.id ASC\n304             \"\"\"\n305         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\admin_users.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 291,
+      "line_range": [
+        291,
+        292,
+        293,
+        294,
+        295,
+        296,
+        297,
+        298,
+        299,
+        300,
+        301,
+        302,
+        303,
+        304
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "621     try:\n622         db.execute(text(f\"UPDATE users SET {sets} WHERE id = :id\"), fields)\n623         if disabling:\n",
+      "col_offset": 24,
+      "end_col_offset": 65,
+      "filename": "backend/app\\admin_users.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 622,
+      "line_range": [
+        622
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "631                 text(\n632                     f\"\"\"\n633                     INSERT INTO org_user_profiles ({\", \".join(columns)})\n634                     VALUES ({placeholders})\n635                     ON DUPLICATE KEY UPDATE {updates}, updated_at = NOW()\n636                     \"\"\"\n637                 ),\n",
+      "col_offset": 20,
+      "end_col_offset": 23,
+      "filename": "backend/app\\admin_users.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 632,
+      "line_range": [
+        632,
+        633,
+        634,
+        635,
+        636
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "25     # API\n26     API_HOST: str = Field(default=\"0.0.0.0\")\n27     API_PORT: int = Field(default=8000)\n",
+      "col_offset": 34,
+      "end_col_offset": 43,
+      "filename": "backend/app\\config.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 605,
+        "link": "https://cwe.mitre.org/data/definitions/605.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible binding to all interfaces.",
+      "line_number": 26,
+      "line_range": [
+        26
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b104_hardcoded_bind_all_interfaces.html",
+      "test_id": "B104",
+      "test_name": "hardcoded_bind_all_interfaces"
+    },
+    {
+      "code": "73         )\n74     except Exception:\n75         pass\n76 \n",
+      "col_offset": 4,
+      "end_col_offset": 12,
+      "filename": "backend/app\\dev_routes.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 74,
+      "line_range": [
+        74,
+        75
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "303     audit.info(\"entra_sign_in user_id=%s client=mobile\", int(user[\"id\"]))\n304     return {\"access_token\": token, \"token_type\": \"bearer\", \"expires_at\": expires_at.isoformat() + \"Z\"}\n",
+      "col_offset": 35,
+      "end_col_offset": 47,
+      "filename": "backend/app\\entra.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'bearer'",
+      "line_number": 304,
+      "line_range": [
+        304
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
+      "test_id": "B105",
+      "test_name": "hardcoded_password_string"
+    },
+    {
+      "code": "78     return Credential(key=key, thumbprint_s256=_b64url(thumbprint),\n79                       thumbprint_sha1_hex=certificate.fingerprint(hashes.SHA1()).hex().upper(), not_after=not_after,\n80                       subject=certificate.subject.rfc4514_string())\n",
+      "col_offset": 66,
+      "end_col_offset": 79,
+      "filename": "backend/app\\entra_credential.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 327,
+        "link": "https://cwe.mitre.org/data/definitions/327.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Use of insecure MD2, MD4, MD5, or SHA1 hash function.",
+      "line_number": 79,
+      "line_range": [
+        79
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b303-md5",
+      "test_id": "B303",
+      "test_name": "blacklist"
+    },
+    {
+      "code": "333     try:\n334         with urlopen(url, timeout=timeout) as resp:\n335             payload = resp.read().decode(\"utf-8\", errors=\"ignore\")\n",
+      "col_offset": 13,
+      "end_col_offset": 42,
+      "filename": "backend/app\\main.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 22,
+        "link": "https://cwe.mitre.org/data/definitions/22.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Audit url open for permitted schemes. Allowing use of file:/ or custom schemes is often unexpected.",
+      "line_number": 334,
+      "line_range": [
+        334
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b310-urllib-urlopen",
+      "test_id": "B310",
+      "test_name": "blacklist"
+    },
+    {
+      "code": "555     # for_update: read the latest saved row and hold it until the save commits.\n556     row = db.execute(text(\"\"\"\n557         SELECT\n558           submission_id,\n559           location_id,\n560           report_date, district, county, route, post_mile, ea, project_id,\n561           date_incident_reported, district_contact,\n562           latitude, longitude,\n563           distribution_code, highway_status_cause, highway_status_code, lanes_closed_count, open_highway_traffic_lanes_count,\n564           pavement_ground_cracks,\n565           settlement_in, bulge_in, indented_by_rocks,\n566           pavement_ground_annotation_layout_json,\n567           failure_rock_fall, failure_topple, failure_slide, failure_spread, failure_flow,\n568           failure_compound, failure_erosion, failure_surficial_failure, failure_scoured_toe, failure_washout,\n569           incident_type_description,\n570           distribution_advancing, distribution_retrogressive, distribution_enlarging, distribution_widening, distribution_moving, distribution_confined,\n571           material_rock, material_soil, material_bedding, material_joints, material_fractures, material_pavement_type,\n572           est_soil_pct, est_rock_pct, est_clay_pct, est_silt_pct, est_sand_pct, est_gravel_pct, est_boulder_pct,\n573           est_debris_clay_silt_pct, est_debris_sand_pct, est_debris_gravel_pct, est_debris_boulder_pct,\n574           water_dry, water_moist, water_wet, water_flowing, water_seep, water_spring,\n575           vegetation_trees, vegetation_bushes_shrubs, vegetation_groundcover,\n576           drainage_clogged_inlet, drainage_compromised_drains, drainage_surface_runoff, drainage_torrent_surge_flood,\n577           impact_impacted_adj_utilities, impact_maybe_adj_utilities, impact_adj_utilities,\n578           impact_impacted_adj_properties, impact_maybe_adj_properties, impact_adj_properties,\n579           impact_impacted_adj_structure, impact_maybe_adj_structure, impact_adj_structure,\n580           measure_slope_height_ft, measure_original_slope_deg, measure_landslide_width_ft, measure_landslide_length_ft,\n581           measure_main_scarp_height_ft, measure_landslide_slope_deg, measure_roadway_length_ft, measure_roadway_width_ft,\n582           record_of_event_notes, maintenance_history_notes, geotechnical_assessment_notes, recommendations_notes, sketchpad_notes,\n583           observations_notes, geometry_json,\n584           observations_notes_html, geotechnical_assessment_notes_html, recommendations_notes_html, sketchpad_notes_html,\n585           road_inventory_dataset_version_id, road_inventory_segment_id,\n586           road_inventory_snapshot_json, road_inventory_match_method, road_inventory_checked_at,\n587           elevation_profile_json, elevation_profile_source, elevation_profile_checked_at,\n588           elevation_profile_classification, elevation_profile_confidence, elevation_profile_error,\n589           elevation_terrain_grid_json, elevation_terrain_source, elevation_terrain_checked_at, elevation_terrain_error,\n590           updated_by_user_id, revision, created_at, updated_at\n591         FROM submission_gisa\n592         WHERE submission_id = :sid\n593         LIMIT 1\n594     \"\"\" + (\" FOR UPDATE\" if for_update else \"\")), {\"sid\": submission_id}).mappings().first()\n595     if not row:\n",
+      "col_offset": 26,
+      "end_col_offset": 7,
+      "filename": "backend/app\\main.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 556,
+      "line_range": [
+        556,
+        557,
+        558,
+        559,
+        560,
+        561,
+        562,
+        563,
+        564,
+        565,
+        566,
+        567,
+        568,
+        569,
+        570,
+        571,
+        572,
+        573,
+        574,
+        575,
+        576,
+        577,
+        578,
+        579,
+        580,
+        581,
+        582,
+        583,
+        584,
+        585,
+        586,
+        587,
+        588,
+        589,
+        590,
+        591,
+        592,
+        593,
+        594
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "601             d[\"geometry_json\"] = json.loads(d[\"geometry_json\"])\n602         except Exception:\n603             pass\n604     if isinstance(d.get(\"pavement_ground_annotation_layout_json\"), str):\n",
+      "col_offset": 8,
+      "end_col_offset": 16,
+      "filename": "backend/app\\main.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 602,
+      "line_range": [
+        602,
+        603
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "606             d[\"pavement_ground_annotation_layout_json\"] = json.loads(d[\"pavement_ground_annotation_layout_json\"])\n607         except Exception:\n608             pass\n609 \n",
+      "col_offset": 8,
+      "end_col_offset": 16,
+      "filename": "backend/app\\main.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 607,
+      "line_range": [
+        607,
+        608
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "991     if is_public_only(user):\n992         rows = db.execute(text(\"\"\"\n993             SELECT s.id, s.created_by_user_id, s.status, s.client_submission_uuid, s.title,\n994                    s.created_at, s.submitted_at, s.reviewed_at,\n995                    g.district, g.county, g.route, g.post_mile\n996             FROM submissions s\n997             LEFT JOIN submission_gisa g ON g.submission_id = s.id\n998             JOIN assessments a\n999               ON a.submission_id = s.id\n1000               OR EXISTS (\n1001                 SELECT 1 FROM assessment_submissions asub\n1002                 WHERE asub.assessment_id = a.id AND asub.submission_id = s.id\n1003               )\n1004             WHERE a.state IN ('APPROVED','FINALIZED')\n1005             \"\"\" + (\" AND s.status = :status\" if status else \"\") + \"\"\"\n1006             GROUP BY s.id, s.created_by_user_id, s.status, s.client_submission_uuid, s.title,\n",
+      "col_offset": 31,
+      "end_col_offset": 15,
+      "filename": "backend/app\\main.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 992,
+      "line_range": [
+        992,
+        993,
+        994,
+        995,
+        996,
+        997,
+        998,
+        999,
+        1000,
+        1001,
+        1002,
+        1003,
+        1004,
+        1005
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "1017         readable = form_access.readable_sql(db, user, params)\n1018         rows = db.execute(text(\"\"\"\n1019             SELECT s.id, s.created_by_user_id, s.status, s.client_submission_uuid, s.title,\n1020                    s.created_at, s.submitted_at, s.reviewed_at,\n1021                    g.district, g.county, g.route, g.post_mile\n1022             FROM submissions s\n1023             LEFT JOIN submission_gisa g ON g.submission_id = s.id\n1024             WHERE \"\"\" + readable + (\" AND s.status = :status\" if status else \"\") + \"\"\"\n1025             ORDER BY s.id DESC\n",
+      "col_offset": 31,
+      "end_col_offset": 21,
+      "filename": "backend/app\\main.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 1018,
+      "line_range": [
+        1018,
+        1019,
+        1020,
+        1021,
+        1022,
+        1023,
+        1024
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "1034 \n1035     rows = db.execute(text(\"\"\"\n1036         SELECT DISTINCT s.id, s.created_by_user_id, s.status, s.client_submission_uuid, s.title,\n1037                s.created_at, s.submitted_at, s.reviewed_at,\n1038                g.district, g.county, g.route, g.post_mile\n1039         FROM submissions s\n1040         LEFT JOIN submission_visibility v\n1041           ON v.submission_id = s.id AND v.user_id = :uid\n1042         LEFT JOIN submission_editors e\n1043           ON e.submission_id = s.id AND e.user_id = :uid\n1044         LEFT JOIN submission_gisa g ON g.submission_id = s.id\n1045         \"\"\" + where_clause + \"\"\"\n1046         ORDER BY s.id DESC\n",
+      "col_offset": 27,
+      "end_col_offset": 11,
+      "filename": "backend/app\\main.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 1035,
+      "line_range": [
+        1035,
+        1036,
+        1037,
+        1038,
+        1039,
+        1040,
+        1041,
+        1042,
+        1043,
+        1044,
+        1045
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "1484             set_parts.append(\"revision = revision + 1\")\n1485             update_sql = f\"UPDATE submission_gisa SET {', '.join(set_parts)} WHERE submission_id = :sid\"\n1486             db.execute(text(update_sql), params)\n",
+      "col_offset": 25,
+      "end_col_offset": 104,
+      "filename": "backend/app\\main.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 1485,
+      "line_range": [
+        1485
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "1494                 params[key] = value\n1495             insert_sql = f\"INSERT INTO submission_gisa ({', '.join(cols)}) VALUES ({', '.join(vals)})\"\n1496             db.execute(text(insert_sql), params)\n",
+      "col_offset": 25,
+      "end_col_offset": 102,
+      "filename": "backend/app\\main.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 1495,
+      "line_range": [
+        1495
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "1548             return auto_bearing, \"arcgis_postmile_geometry\"\n1549     except Exception:\n1550         pass  # Network/ArcGIS errors are non-fatal; bearing remains None\n1551     return None, None\n",
+      "col_offset": 4,
+      "end_col_offset": 12,
+      "filename": "backend/app\\main.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1549,
+      "line_range": [
+        1549,
+        1550
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "2258         params = {f\"u{i}\": uid for i, uid in enumerate(target_ids)}\n2259         rows = db.execute(text(f\"\"\"\n2260             SELECT id\n2261             FROM users\n2262             WHERE is_active = 1 AND id IN ({placeholders})\n2263         \"\"\"), params).scalars().all()\n2264         existing = {int(x) for x in rows}\n",
+      "col_offset": 31,
+      "end_col_offset": 11,
+      "filename": "backend/app\\main.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 2259,
+      "line_range": [
+        2259,
+        2260,
+        2261,
+        2262,
+        2263
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "259     row = db.execute(\n260         text(f\"SELECT {_ASSESSMENT_COLUMNS} FROM assessments a WHERE a.id = :aid LIMIT 1\"),\n261         {\"aid\": assessment_id},\n",
+      "col_offset": 13,
+      "end_col_offset": 89,
+      "filename": "backend/app\\routes\\assessments.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 260,
+      "line_range": [
+        260
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "267     row = db.execute(\n268         text(f\"SELECT {_ASSESSMENT_COLUMNS} FROM assessments a WHERE a.incident_id = :iid LIMIT 1\"),\n269         {\"iid\": incident_id},\n",
+      "col_offset": 13,
+      "end_col_offset": 98,
+      "filename": "backend/app\\routes\\assessments.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 268,
+      "line_range": [
+        268
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "283         text(\n284             f\"\"\"\n285             SELECT assessment_id, submission_id\n286             FROM assessment_submissions\n287             WHERE assessment_id IN ({placeholders})\n288             ORDER BY assessment_id ASC, id ASC\n289             \"\"\"\n290         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\routes\\assessments.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 284,
+      "line_range": [
+        284,
+        285,
+        286,
+        287,
+        288,
+        289
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "1112     rows = [dict(r) for r in db.execute(\n1113         text(f\"\"\"\n1114             SELECT a.id, a.incident_id, a.state, a.routing_path, a.office_code, a.branch_chief_user_id,\n1115                    a.assigned_engineer_user_id, a.routed_branch_id, a.routed_branch_name, a.routed_branch_letter,\n1116                    a.updated_at, i.title\n1117               FROM assessments a LEFT JOIN incidents i ON i.id = a.incident_id\n1118              WHERE {' AND '.join(scope)}\n1119              ORDER BY a.updated_at DESC, a.id DESC\n1120              LIMIT 1000\n1121         \"\"\"),\n1122         params,\n",
+      "col_offset": 13,
+      "end_col_offset": 11,
+      "filename": "backend/app\\routes\\assessments.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 1113,
+      "line_range": [
+        1113,
+        1114,
+        1115,
+        1116,
+        1117,
+        1118,
+        1119,
+        1120,
+        1121
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "1292         text(\n1293             f\"\"\"\n1294             SELECT {_ASSESSMENT_COLUMNS}\n1295             FROM assessments a\n1296             {where_sql}\n1297             ORDER BY a.updated_at DESC, a.id DESC\n1298             LIMIT :limit\n1299             \"\"\"\n1300         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\routes\\assessments.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 1293,
+      "line_range": [
+        1293,
+        1294,
+        1295,
+        1296,
+        1297,
+        1298,
+        1299
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "107         return response\n108     return {\"access_token\": token, \"token_type\": \"bearer\", \"expires_at\": expires_at.isoformat() + \"Z\"}\n109 \n",
+      "col_offset": 35,
+      "end_col_offset": 47,
+      "filename": "backend/app\\routes\\auth.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'bearer'",
+      "line_number": 108,
+      "line_range": [
+        108
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
+      "test_id": "B105",
+      "test_name": "hardcoded_password_string"
+    },
+    {
+      "code": "338         result = db.execute(text(\n339             f\"INSERT INTO submission_gisa_cracks ({', '.join(columns)}) VALUES ({', '.join(':' + c for c in columns)})\"\n340         ), params)\n",
+      "col_offset": 12,
+      "end_col_offset": 119,
+      "filename": "backend/app\\routes\\cracks.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 339,
+      "line_range": [
+        339
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "370         changed = db.execute(text(\n371             f\"UPDATE submission_gisa_cracks SET {', '.join(sets)} \"\n372             \"WHERE id = :id AND submission_id = :sid AND revision = :rev\"\n373         ), params).rowcount\n",
+      "col_offset": 12,
+      "end_col_offset": 73,
+      "filename": "backend/app\\routes\\cracks.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 371,
+      "line_range": [
+        371,
+        372
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "343     if sets:\n344         db.execute(text(f\"UPDATE submission_drone_surveys SET {', '.join(sets)} WHERE id = :id\"), params)\n345         db.commit()\n",
+      "col_offset": 24,
+      "end_col_offset": 95,
+      "filename": "backend/app\\routes\\drone_surveys.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 344,
+      "line_range": [
+        344
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "328         text(\n329             f\"\"\"\n330             SELECT\n331               eg.id, eg.event_group_key, eg.title, eg.description, eg.status,\n332               eg.anchor_location_id, eg.anchor_latitude, eg.anchor_longitude,\n333               eg.district, eg.county, eg.route, eg.post_mile,\n334               eg.created_from_incident_id, eg.created_by_user_id, eg.source,\n335               eg.closed_at, eg.closed_by_user_id, eg.created_at, eg.updated_at,\n336               COUNT(i.id) AS incident_count,\n337               SUM(CASE WHEN i.status <> 'RESOLVED' THEN 1 ELSE 0 END) AS open_incident_count,\n338               MAX(i.updated_at) AS latest_incident_activity_at,\n339               AVG(i.latitude) AS centroid_latitude,\n340               AVG(i.longitude) AS centroid_longitude\n341             FROM event_groups eg\n342             LEFT JOIN incidents i ON i.event_group_id = eg.id\n343             {where_sql}\n344             GROUP BY eg.id\n345             ORDER BY eg.updated_at DESC, eg.id DESC\n346             LIMIT :limit\n347             \"\"\"\n348         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\routes\\event_groups.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 329,
+      "line_range": [
+        329,
+        330,
+        331,
+        332,
+        333,
+        334,
+        335,
+        336,
+        337,
+        338,
+        339,
+        340,
+        341,
+        342,
+        343,
+        344,
+        345,
+        346,
+        347
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "393     try:\n394         db.execute(text(f\"UPDATE event_groups SET {', '.join(sets)}, updated_at = NOW() WHERE id = :egid\"), params)\n395         _record_event_group_event(\n",
+      "col_offset": 24,
+      "end_col_offset": 105,
+      "filename": "backend/app\\routes\\event_groups.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 394,
+      "line_range": [
+        394
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "138         text(\n139             f\"\"\"\n140             SELECT\n141               i.id AS incident_id,\n142               a.id AS assessment_id,\n143               a.state AS assessment_state,\n144               a.submission_id,\n145               a.submitted_at,\n146               a.approved_at,\n147               a.finalized_at,\n148               CASE\n149                 WHEN a.state IN ('SUBMITTED', 'APPROVED', 'FINALIZED')\n150                 THEN it.incident_type_code\n151                 ELSE NULL\n152               END AS incident_type_code\n153             FROM incidents i\n154             LEFT JOIN assessments a ON a.incident_id = i.id\n155             LEFT JOIN submission_gisa_incident_types it\n156               ON a.state IN ('SUBMITTED', 'APPROVED', 'FINALIZED')\n157              AND (\n158                it.submission_id = a.submission_id\n159                OR it.submission_id IN (\n160                  SELECT s.submission_id FROM assessment_submissions s WHERE s.assessment_id = a.id\n161                )\n162              )\n163             WHERE i.id IN ({placeholders}){scope_sql}\n164             ORDER BY i.id ASC, it.incident_type_code ASC\n165             \"\"\"\n166         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\routes\\incident_classification.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 139,
+      "line_range": [
+        139,
+        140,
+        141,
+        142,
+        143,
+        144,
+        145,
+        146,
+        147,
+        148,
+        149,
+        150,
+        151,
+        152,
+        153,
+        154,
+        155,
+        156,
+        157,
+        158,
+        159,
+        160,
+        161,
+        162,
+        163,
+        164,
+        165
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "372         text(\n373             f\"\"\"\n374             SELECT\n375               i.id,\n376               i.status,\n377               i.current_stage,\n378               i.description,\n379               i.first_observed_at,\n380               i.first_occurred_at,\n381               i.created_at,\n382               i.updated_at,\n383               i.linked_submission_id\n384             FROM (\n385               SELECT\n386                 inc.id,\n387                 inc.status,\n388                 inc.current_stage,\n389                 inc.description,\n390                 inc.first_observed_at,\n391                 inc.first_occurred_at,\n392                 inc.created_at,\n393                 inc.updated_at,\n394                 isl.submission_id AS linked_submission_id\n395               FROM incidents inc\n396               LEFT JOIN incident_submission_links isl\n397                 ON isl.incident_id = inc.id\n398               WHERE inc.location_id = :location_id{incident_public_sql}\n399               ORDER BY inc.first_observed_at DESC, inc.id DESC\n400               LIMIT :limit\n401             ) i\n402             ORDER BY i.first_observed_at DESC, i.id DESC\n403             \"\"\"\n404         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\routes\\incidents.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 373,
+      "line_range": [
+        373,
+        374,
+        375,
+        376,
+        377,
+        378,
+        379,
+        380,
+        381,
+        382,
+        383,
+        384,
+        385,
+        386,
+        387,
+        388,
+        389,
+        390,
+        391,
+        392,
+        393,
+        394,
+        395,
+        396,
+        397,
+        398,
+        399,
+        400,
+        401,
+        402,
+        403
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "409         text(\n410             f\"\"\"\n411             SELECT\n412               s.id,\n413               s.status,\n414               s.title,\n415               s.created_at,\n416               s.updated_at,\n417               s.submitted_at,\n418               s.reviewed_at,\n419               g.date_incident_reported,\n420               g.report_date\n421             FROM submissions s\n422             JOIN submission_gisa g\n423               ON g.submission_id = s.id\n424             WHERE g.location_id = :location_id{submission_public_sql}\n425             ORDER BY s.created_at DESC, s.id DESC\n426             LIMIT :limit\n427             \"\"\"\n428         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\routes\\incidents.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 410,
+      "line_range": [
+        410,
+        411,
+        412,
+        413,
+        414,
+        415,
+        416,
+        417,
+        418,
+        419,
+        420,
+        421,
+        422,
+        423,
+        424,
+        425,
+        426,
+        427
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "516         where_parts.append(\n517             \"\"\"(\n518               EXISTS (\n519                 SELECT 1 FROM org_coordinator_coverage c\n520                  WHERE c.user_id = u.id AND c.district = :district AND c.is_active = 1\n521               )\n522               OR \"\"\"\n523             + org_directory.USER_DISTRICT_SQL\n524             + \" = :district)\"\n",
+      "col_offset": 12,
+      "end_col_offset": 20,
+      "filename": "backend/app\\routes\\incidents.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 517,
+      "line_range": [
+        517,
+        518,
+        519,
+        520,
+        521,
+        522,
+        523
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "536         text(\n537             f\"\"\"\n538             SELECT DISTINCT u.id\n539             FROM users u\n540             JOIN user_roles ur ON ur.user_id = u.id\n541             JOIN roles r ON r.id = ur.role_id\n542             {org_directory.USER_ORG_JOIN_SQL}\n543             WHERE {' AND '.join(where_parts)}\n544             ORDER BY u.id ASC\n545             \"\"\"\n546         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\routes\\incidents.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 537,
+      "line_range": [
+        537,
+        538,
+        539,
+        540,
+        541,
+        542,
+        543,
+        544,
+        545
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "614         text(\n615             f\"\"\"\n616             SELECT\n617               w.owner_id,\n618               COUNT(DISTINCT w.assessment_id) AS open_assessment_count,\n619               COUNT(DISTINCT CASE WHEN w.awaiting = 1 THEN w.assessment_id END) AS awaiting_action_count\n620             FROM (\n621               SELECT\n622                 a.branch_chief_user_id AS owner_id,\n623                 a.id AS assessment_id,\n624                 CASE WHEN a.state IN ('PENDING_ENGINEER_ASSIGNMENT', 'SUBMITTED') THEN 1 ELSE 0 END AS awaiting\n625               FROM assessments a\n626               WHERE a.state NOT IN {_PICKER_TERMINAL_STATES}\n627                 AND a.branch_chief_user_id IN ({tokens})\n628               UNION ALL\n629               SELECT\n630                 a.assigned_engineer_user_id AS owner_id,\n631                 a.id AS assessment_id,\n632                 CASE WHEN a.state IN ('DRAFT', 'REVISION_REQUESTED') THEN 1 ELSE 0 END AS awaiting\n633               FROM assessments a\n634               WHERE a.state NOT IN {_PICKER_TERMINAL_STATES}\n635                 AND a.assigned_engineer_user_id IN ({tokens})\n636             ) w\n637             GROUP BY w.owner_id\n638             \"\"\"\n639         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\routes\\incidents.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 615,
+      "line_range": [
+        615,
+        616,
+        617,
+        618,
+        619,
+        620,
+        621,
+        622,
+        623,
+        624,
+        625,
+        626,
+        627,
+        628,
+        629,
+        630,
+        631,
+        632,
+        633,
+        634,
+        635,
+        636,
+        637,
+        638
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "671         text(\n672             f\"\"\"\n673             SELECT\n674               u.id, u.email, u.full_name, u.metadata_json,\n675               {org_directory.USER_OFFICE_CODE_SQL} AS resolved_office_code,\n676               {org_directory.USER_DISTRICT_SQL} AS resolved_district,\n677               oo.id AS office_id, oo.name AS office_name, oo.home_city AS office_home_city,\n678               oup.branch_id, oup.home_city AS profile_home_city,\n679               oup.availability, oup.available_from, oup.available_until,\n680               ob.letter AS branch_letter, ob.name AS branch_name,\n681               ob.home_city AS branch_home_city, ob.home_district AS branch_home_district,\n682               ob.is_active AS branch_is_active, ob.accepts_assignments AS branch_accepts_assignments,\n683               ob.sort_order AS branch_sort_order\n684             FROM users u\n685             {org_directory.USER_ORG_JOIN_SQL}\n686               LEFT JOIN org_branches ob ON ob.id = oup.branch_id\n687             WHERE u.id IN ({tokens})\n688             ORDER BY\n689               CASE WHEN {org_directory.USER_OFFICE_CODE_SQL} = :option_office_code THEN 0 ELSE 1 END,\n690               u.full_name ASC,\n691               u.id ASC\n692             \"\"\"\n693         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\routes\\incidents.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 672,
+      "line_range": [
+        672,
+        673,
+        674,
+        675,
+        676,
+        677,
+        678,
+        679,
+        680,
+        681,
+        682,
+        683,
+        684,
+        685,
+        686,
+        687,
+        688,
+        689,
+        690,
+        691,
+        692
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "796         text(\n797             f\"\"\"\n798             SELECT branch_id, district\n799               FROM org_branch_districts\n800              WHERE branch_id IN ({tokens}) AND is_active = 1\n801              ORDER BY district ASC\n802             \"\"\"\n803         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\routes\\incidents.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 797,
+      "line_range": [
+        797,
+        798,
+        799,
+        800,
+        801,
+        802
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "1497         text(\n1498             f\"\"\"\n1499             INSERT INTO submission_gisa (\n1500               submission_id,\n1501               location_id,\n1502               report_date,\n1503               date_incident_reported,\n1504               district,\n1505               county,\n1506               route,\n1507               post_mile,\n1508               latitude,\n1509               longitude,\n1510               updated_by_user_id{ri_cols}\n1511             ) VALUES (\n1512               :sid,\n1513               :location_id,\n1514               :date_incident_reported,\n1515               CURDATE(),\n1516               :district,\n1517               :county,\n1518               :route,\n1519               :post_mile,\n1520               :lat,\n1521               :lon,\n1522               :updated_by{ri_vals}\n1523             )\n1524             \"\"\"\n1525         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\routes\\incidents.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 1498,
+      "line_range": [
+        1498,
+        1499,
+        1500,
+        1501,
+        1502,
+        1503,
+        1504,
+        1505,
+        1506,
+        1507,
+        1508,
+        1509,
+        1510,
+        1511,
+        1512,
+        1513,
+        1514,
+        1515,
+        1516,
+        1517,
+        1518,
+        1519,
+        1520,
+        1521,
+        1522,
+        1523,
+        1524
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "2039             text(\n2040                 f\"\"\"\n2041                 UPDATE incidents\n2042                 SET title = :title,\n2043                     incident_type = :incident_type,\n2044                     description = :description,\n2045                     latitude = :lat,\n2046                     longitude = :lon,\n2047                     first_observed_at = :first_observed_at,\n2048                     first_occurred_at = :first_occurred_at,\n2049                     district = :district,\n2050                     county = :county,\n2051                     route = :route,\n2052                     post_mile = :post_mile,\n2053                     office_code = :office_code,\n2054                     {ri_set_sql}\n2055                     location_id = NULL,\n2056                     location_match_status = 'PENDING_REVIEW',\n2057                     location_reviewed_by_user_id = NULL,\n2058                     location_reviewed_at = NULL,\n2059                     location_match_metadata = :metadata,\n2060                     updated_at = NOW()\n2061                 WHERE id = :iid\n2062                 \"\"\"\n2063             ),\n",
+      "col_offset": 16,
+      "end_col_offset": 19,
+      "filename": "backend/app\\routes\\incidents.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 2040,
+      "line_range": [
+        2040,
+        2041,
+        2042,
+        2043,
+        2044,
+        2045,
+        2046,
+        2047,
+        2048,
+        2049,
+        2050,
+        2051,
+        2052,
+        2053,
+        2054,
+        2055,
+        2056,
+        2057,
+        2058,
+        2059,
+        2060,
+        2061,
+        2062
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "2147         text(\n2148             f\"\"\"\n2149             SELECT\n2150               i.id, i.title, i.incident_type, i.description,\n2151               i.location_id, i.location_match_status, i.location_reviewed_by_user_id, i.location_match_metadata, i.location_reviewed_at,\n2152               i.first_observed_at, i.first_occurred_at,\n2153               i.latitude, i.longitude, i.district, i.county, i.route, i.post_mile,\n2154               i.road_inventory_dataset_version_id, i.road_inventory_segment_id,\n2155               i.road_inventory_snapshot_json, i.road_inventory_match_method, i.road_inventory_checked_at,\n2156               i.office_code, i.current_stage, i.event_group_id, i.incident_key,\n2157               i.status, i.reporter_user_id, i.created_at, i.updated_at,\n2158               i.resolved_at, i.resolved_by_user_id, i.resolution_comment,\n2159               i.triage_disposition, i.triage_decided_by_user_id, i.triage_decided_at,\n2160               i.triage_notes, i.duplicate_of_incident_id, i.duplicate_of_location_id,\n2161               a.id AS assignment_id, a.assignee_user_id, a.assigned_by_user_id,\n2162               a.assignment_mode, a.assignment_stage, a.created_at AS assigned_at,\n2163               u.email AS assignee_email, u.full_name AS assignee_name,\n2164               ru.full_name AS reporter_name, ru.email AS reporter_email,\n2165               tu.full_name AS triage_decided_by_name,\n2166               rsu.full_name AS resolved_by_name,\n2167               isl.submission_id\n2168             FROM incidents i\n2169             LEFT JOIN incident_assignments a\n2170               ON a.incident_id = i.id AND a.assignment_stage = 'ENGINEER' AND a.is_active = 1\n2171             LEFT JOIN users u\n2172               ON u.id = a.assignee_user_id\n2173             -- The reporter by name. Coordinator triage has to say who filed a\n2174             -- report before it can be judged, and \"User #7\" is not an answer\n2175             -- (redesign plan B5).\n2176             LEFT JOIN users ru\n2177               ON ru.id = i.reporter_user_id\n2178             LEFT JOIN users tu\n2179               ON tu.id = i.triage_decided_by_user_id\n2180             LEFT JOIN users rsu\n2181               ON rsu.id = i.resolved_by_user_id\n2182             LEFT JOIN incident_submission_links isl\n2183               ON isl.incident_id = i.id\n2184             {where_sql}\n2185             ORDER BY i.created_at DESC, i.id DESC\n2186             LIMIT :limit\n2187             \"\"\"\n2188         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\routes\\incidents.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 2148,
+      "line_range": [
+        2148,
+        2149,
+        2150,
+        2151,
+        2152,
+        2153,
+        2154,
+        2155,
+        2156,
+        2157,
+        2158,
+        2159,
+        2160,
+        2161,
+        2162,
+        2163,
+        2164,
+        2165,
+        2166,
+        2167,
+        2168,
+        2169,
+        2170,
+        2171,
+        2172,
+        2173,
+        2174,
+        2175,
+        2176,
+        2177,
+        2178,
+        2179,
+        2180,
+        2181,
+        2182,
+        2183,
+        2184,
+        2185,
+        2186,
+        2187
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "2614         text(\n2615             f\"\"\"\n2616             SELECT\n2617               i.id,\n2618               i.title,\n2619               i.incident_type,\n2620               i.current_stage,\n2621               i.status,\n2622               i.latitude,\n2623               i.longitude,\n2624               i.created_at,\n2625               i.updated_at,\n2626               a.assignee_user_id,\n2627               u.full_name AS assignee_name,\n2628               isl.submission_id\n2629             FROM incidents i\n2630             LEFT JOIN incident_assignments a\n2631               ON a.incident_id = i.id AND a.is_active = 1\n2632             LEFT JOIN users u\n2633               ON u.id = a.assignee_user_id\n2634             LEFT JOIN incident_submission_links isl\n2635               ON isl.incident_id = i.id\n2636             {where_sql}\n2637             ORDER BY i.created_at DESC, i.id DESC\n2638             \"\"\"\n2639         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\routes\\incidents.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 2615,
+      "line_range": [
+        2615,
+        2616,
+        2617,
+        2618,
+        2619,
+        2620,
+        2621,
+        2622,
+        2623,
+        2624,
+        2625,
+        2626,
+        2627,
+        2628,
+        2629,
+        2630,
+        2631,
+        2632,
+        2633,
+        2634,
+        2635,
+        2636,
+        2637,
+        2638
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "29         text(\n30             f\"\"\"\n31             SELECT\n32               eg.id, eg.event_group_key, eg.title, eg.description, eg.status,\n33               eg.anchor_location_id, eg.anchor_latitude, eg.anchor_longitude,\n34               eg.district, eg.county, eg.route, eg.post_mile,\n35               eg.created_from_incident_id, eg.created_by_user_id, eg.source,\n36               eg.closed_at, eg.closed_by_user_id, eg.created_at, eg.updated_at,\n37               COUNT(i.id) AS incident_count,\n38               SUM(CASE WHEN i.status <> 'RESOLVED' THEN 1 ELSE 0 END) AS open_incident_count,\n39               MAX(i.updated_at) AS latest_incident_activity_at,\n40               AVG(i.latitude) AS centroid_latitude,\n41               AVG(i.longitude) AS centroid_longitude\n42             FROM event_groups eg\n43             LEFT JOIN incidents i ON i.event_group_id = eg.id\n44             {where}\n45             GROUP BY eg.id\n46             -- A group is a site only while a report in the incident record is in\n47             -- it; an emptied group has nothing to show on the map.\n48             HAVING COUNT(i.id) > 0\n49             ORDER BY eg.id ASC\n50             LIMIT :limit\n51             \"\"\"\n52         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\routes\\mission_center_event_groups.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 30,
+      "line_range": [
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "44         text(\n45             f\"\"\"\n46             SELECT\n47               p.id, p.project_uuid, p.title, p.description, p.status,\n48               p.anchor_location_id, p.anchor_latitude, p.anchor_longitude,\n49               p.district, p.county, p.route, p.post_mile,\n50               p.created_from_incident_id, p.created_by_user_id, p.source,\n51               p.closed_at, p.closed_by_user_id, p.created_at, p.updated_at,\n52               COUNT(i.id) AS incident_count,\n53               SUM(CASE WHEN i.status <> 'RESOLVED' THEN 1 ELSE 0 END) AS open_incident_count,\n54               MAX(i.updated_at) AS latest_incident_activity_at,\n55               AVG(i.latitude) AS centroid_latitude,\n56               AVG(i.longitude) AS centroid_longitude\n57             FROM projects p\n58             LEFT JOIN incidents i ON i.project_id = p.id\n59             {where}\n60             GROUP BY p.id\n61             ORDER BY p.id ASC\n62             LIMIT :limit_plus_one\n63             \"\"\"\n64         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\routes\\mission_center_gis.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 45,
+      "line_range": [
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "271         text(\n272             f\"\"\"\n273             SELECT id, office_id, district, is_primary, is_active\n274               FROM org_office_districts\n275              WHERE office_id IN ({tokens})\n276              ORDER BY district ASC\n277             \"\"\"\n278         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\routes\\org.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 272,
+      "line_range": [
+        272,
+        273,
+        274,
+        275,
+        276,
+        277
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "300         text(\n301             f\"\"\"\n302             SELECT id, branch_id, district, source, notes, is_active\n303               FROM org_branch_districts\n304              WHERE branch_id IN ({tokens})\n305              ORDER BY district ASC\n306             \"\"\"\n307         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\routes\\org.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 301,
+      "line_range": [
+        301,
+        302,
+        303,
+        304,
+        305,
+        306
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "368         text(\n369             f\"\"\"\n370             SELECT o.id, o.code, o.org_type, o.unit_number, o.name, o.short_name,\n371                    o.home_city, o.home_district, o.home_location_label,\n372                    o.is_routing_target, o.is_active, o.sort_order\n373               FROM org_offices o\n374               {office_filter}\n375              ORDER BY o.sort_order ASC, o.code ASC\n376             \"\"\"\n377         )\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\routes\\org.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 369,
+      "line_range": [
+        369,
+        370,
+        371,
+        372,
+        373,
+        374,
+        375,
+        376
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "387             text(\n388                 f\"\"\"\n389                 SELECT b.id, b.office_id, b.unit_type, b.letter, b.name, b.home_city,\n390                        b.home_district, b.accepts_assignments, b.is_active, b.sort_order\n391                   FROM org_branches b\n392                  WHERE b.office_id IN ({tokens}){branch_filter}\n393                  ORDER BY b.sort_order ASC, b.letter ASC, b.name ASC\n394                 \"\"\"\n395             ),\n",
+      "col_offset": 16,
+      "end_col_offset": 19,
+      "filename": "backend/app\\routes\\org.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 388,
+      "line_range": [
+        388,
+        389,
+        390,
+        391,
+        392,
+        393,
+        394
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "464         text(\n465             f\"\"\"\n466             SELECT o.id, o.code, o.org_type, o.unit_number, o.name, o.short_name,\n467                    o.home_city, o.home_district, o.home_location_label,\n468                    o.is_routing_target, o.is_active, o.sort_order,\n469                    (SELECT COUNT(*) FROM org_branches b\n470                      WHERE b.office_id = o.id AND b.is_active = 1) AS branch_count,\n471                    (SELECT COUNT(*) FROM org_user_profiles p\n472                      WHERE p.office_id = o.id) AS member_count\n473               FROM org_offices o\n474               {where_sql}\n475              ORDER BY o.sort_order ASC, o.code ASC\n476             \"\"\"\n477         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\routes\\org.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 465,
+      "line_range": [
+        465,
+        466,
+        467,
+        468,
+        469,
+        470,
+        471,
+        472,
+        473,
+        474,
+        475,
+        476
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "604     try:\n605         db.execute(text(f\"UPDATE org_offices SET {sets}, updated_at = NOW() WHERE id = :oid\"), fields)\n606         db.commit()\n",
+      "col_offset": 24,
+      "end_col_offset": 92,
+      "filename": "backend/app\\routes\\org.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 605,
+      "line_range": [
+        605
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "685             text(\n686                 f\"\"\"\n687                 SELECT d.district, o.id AS office_id, o.code, o.name\n688                   FROM org_office_districts d\n689                   JOIN org_offices o ON o.id = d.office_id\n690                  WHERE d.district IN ({tokens})\n691                    AND d.is_active = 1\n692                    AND d.org_type = :org_type\n693                    AND d.office_id <> :oid\n694                  ORDER BY d.district ASC\n695                  LIMIT 1\n696                 \"\"\"\n697             ),\n",
+      "col_offset": 16,
+      "end_col_offset": 19,
+      "filename": "backend/app\\routes\\org.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 686,
+      "line_range": [
+        686,
+        687,
+        688,
+        689,
+        690,
+        691,
+        692,
+        693,
+        694,
+        695,
+        696
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "788         text(\n789             f\"\"\"\n790             SELECT b.id, b.office_id, b.parent_branch_id, b.unit_type, b.letter, b.name,\n791                    b.home_city, b.home_district, b.home_location_label, b.chief_user_id,\n792                    b.accepts_assignments, b.is_active, b.sort_order,\n793                    o.code AS office_code,\n794                    (SELECT COUNT(*) FROM org_user_profiles p WHERE p.branch_id = b.id) AS member_count\n795               FROM org_branches b\n796               JOIN org_offices o ON o.id = b.office_id\n797               {where_sql}\n798              ORDER BY o.sort_order ASC, b.sort_order ASC, b.letter ASC, b.name ASC\n799             \"\"\"\n800         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\routes\\org.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 789,
+      "line_range": [
+        789,
+        790,
+        791,
+        792,
+        793,
+        794,
+        795,
+        796,
+        797,
+        798,
+        799
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "959             sets = \", \".join(f\"{key} = :{key}\" for key in fields if key != \"bid\")\n960             db.execute(text(f\"UPDATE org_branches SET {sets}, updated_at = NOW() WHERE id = :bid\"), fields)\n961         if activate == 1 and not was_active:\n",
+      "col_offset": 28,
+      "end_col_offset": 97,
+      "filename": "backend/app\\routes\\org.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 960,
+      "line_range": [
+        960
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "1088     try:\n1089         db.execute(text(f\"UPDATE org_classifications SET {sets}, updated_at = NOW() WHERE id = :cid\"), fields)\n1090         db.commit()\n",
+      "col_offset": 24,
+      "end_col_offset": 100,
+      "filename": "backend/app\\routes\\org.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 1089,
+      "line_range": [
+        1089
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "1124         text(\n1125             f\"\"\"\n1126             SELECT c.id, c.district, c.user_id, c.is_primary, u.email, u.full_name, u.is_active AS user_is_active\n1127               FROM org_coordinator_coverage c\n1128               JOIN users u ON u.id = c.user_id\n1129               {where}\n1130              ORDER BY c.district ASC, c.is_primary DESC, u.full_name ASC\n1131             \"\"\"\n1132         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\routes\\org.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 1125,
+      "line_range": [
+        1125,
+        1126,
+        1127,
+        1128,
+        1129,
+        1130,
+        1131
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "1423             text(\n1424                 f\"\"\"\n1425                 INSERT INTO org_user_profiles ({\", \".join(columns)})\n1426                 VALUES ({placeholders})\n1427                 ON DUPLICATE KEY UPDATE {updates}, source = 'MANUAL', updated_at = NOW()\n1428                 \"\"\"\n1429             ),\n",
+      "col_offset": 16,
+      "end_col_offset": 19,
+      "filename": "backend/app\\routes\\org.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 1424,
+      "line_range": [
+        1424,
+        1425,
+        1426,
+        1427,
+        1428
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "268         text(\n269             f\"\"\"\n270             SELECT\n271               p.id, p.project_uuid, p.title, p.description, p.status,\n272               p.anchor_location_id, p.anchor_latitude, p.anchor_longitude,\n273               p.district, p.county, p.route, p.post_mile,\n274               p.created_from_incident_id, p.created_by_user_id, p.source,\n275               p.closed_at, p.closed_by_user_id, p.created_at, p.updated_at,\n276               COUNT(i.id) AS incident_count,\n277               SUM(CASE WHEN i.status <> 'RESOLVED' THEN 1 ELSE 0 END) AS open_incident_count,\n278               MAX(i.updated_at) AS latest_incident_activity_at,\n279               AVG(i.latitude) AS centroid_latitude,\n280               AVG(i.longitude) AS centroid_longitude\n281             FROM projects p\n282             LEFT JOIN incidents i ON i.project_id = p.id\n283             {where_sql}\n284             GROUP BY p.id\n285             ORDER BY p.updated_at DESC, p.id DESC\n286             LIMIT :limit\n287             \"\"\"\n288         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\routes\\projects.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 269,
+      "line_range": [
+        269,
+        270,
+        271,
+        272,
+        273,
+        274,
+        275,
+        276,
+        277,
+        278,
+        279,
+        280,
+        281,
+        282,
+        283,
+        284,
+        285,
+        286,
+        287
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "333     try:\n334         db.execute(text(f\"UPDATE projects SET {', '.join(sets)}, updated_at = NOW() WHERE id = :pid\"), params)\n335         _record_project_event(\n",
+      "col_offset": 24,
+      "end_col_offset": 100,
+      "filename": "backend/app\\routes\\projects.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 334,
+      "line_range": [
+        334
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "131         text(\n132             f\"\"\"\n133             SELECT i.id, i.incident_key, i.title, i.description, i.incident_type, i.latitude, i.longitude,\n134                    i.location_id, i.status, i.current_stage, i.triage_disposition, i.triage_notes,\n135                    i.triage_decided_at, i.created_at, i.first_observed_at, i.event_group_id,\n136                    i.duplicate_of_incident_id,\n137                    eg.title AS event_group_title, a.id AS assessment_id, a.state AS assessment_state,\n138                    reporter.full_name AS reporter_name, decider.full_name AS decided_by_name\n139               FROM incidents i\n140               LEFT JOIN event_groups eg ON eg.id = i.event_group_id\n141               LEFT JOIN assessments a ON a.incident_id = i.id\n142               LEFT JOIN users reporter ON reporter.id = i.reporter_user_id\n143               LEFT JOIN users decider ON decider.id = i.triage_decided_by_user_id\n144              WHERE i.id NOT IN :excluded AND ({\" OR \".join(clauses)})\n145              ORDER BY COALESCE(i.first_observed_at, i.created_at) DESC\n146              LIMIT 200\n147             \"\"\"\n148         ).bindparams(bindparam(\"excluded\", expanding=True)),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\routes\\site_history.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 132,
+      "line_range": [
+        132,
+        133,
+        134,
+        135,
+        136,
+        137,
+        138,
+        139,
+        140,
+        141,
+        142,
+        143,
+        144,
+        145,
+        146,
+        147
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "169             text(\n170                 f\"\"\"\n171                 SELECT l.incident_id, t.incident_type_code FROM incident_submission_links l\n172                   JOIN submission_gisa_incident_types t ON t.submission_id = l.submission_id\n173                   JOIN submissions s ON s.id = t.submission_id\n174                  WHERE l.incident_id IN :ids AND {readable}\n175                 UNION\n176                 SELECT a.incident_id, t.incident_type_code FROM assessments a\n177                   JOIN submission_gisa_incident_types t ON t.submission_id = a.submission_id\n178                   JOIN submissions s ON s.id = t.submission_id\n179                  WHERE a.incident_id IN :ids AND {readable}\n180                 \"\"\"\n181             ).bindparams(bindparam(\"ids\", expanding=True)),\n",
+      "col_offset": 16,
+      "end_col_offset": 19,
+      "filename": "backend/app\\routes\\site_history.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 170,
+      "line_range": [
+        170,
+        171,
+        172,
+        173,
+        174,
+        175,
+        176,
+        177,
+        178,
+        179,
+        180
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "234             text(\n235                 f\"\"\"\n236                 SELECT f.incident_id, g.action_group, g.action_code FROM (\n237                     SELECT incident_id, submission_id FROM incident_submission_links WHERE incident_id IN :ids\n238                     UNION SELECT incident_id, submission_id FROM assessments\n239                      WHERE incident_id IN :ids AND submission_id IS NOT NULL\n240                     UNION SELECT a.incident_id, s.submission_id FROM assessment_submissions s\n241                       JOIN assessments a ON a.id = s.assessment_id WHERE a.incident_id IN :ids\n242                 ) f\n243                 JOIN submission_gisa_actions g ON g.submission_id = f.submission_id\n244                 JOIN submissions s ON s.id = f.submission_id\n245                 WHERE {readable}\n246                 \"\"\"\n247             ).bindparams(bindparam(\"ids\", expanding=True)),\n",
+      "col_offset": 16,
+      "end_col_offset": 19,
+      "filename": "backend/app\\routes\\site_history.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 235,
+      "line_range": [
+        235,
+        236,
+        237,
+        238,
+        239,
+        240,
+        241,
+        242,
+        243,
+        244,
+        245,
+        246
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "287         text(\n288             f\"\"\"\n289             SELECT\n290               p.id, p.project_key, p.project_number, p.title, p.description,\n291               p.district, p.status, p.source_system, p.external_project_id,\n292               p.last_synced_at, p.created_at, p.updated_at,\n293               COUNT(cs.id) AS cross_section_count\n294             FROM caltrans_projects p\n295             LEFT JOIN terrain_cross_sections cs ON cs.caltrans_project_id = p.id\n296             {where_sql}\n297             GROUP BY\n298               p.id, p.project_key, p.project_number, p.title, p.description,\n299               p.district, p.status, p.source_system, p.external_project_id,\n300               p.last_synced_at, p.created_at, p.updated_at\n301             ORDER BY\n302               CASE WHEN p.project_number IS NULL OR p.project_number = '' THEN 1 ELSE 0 END,\n303               p.project_number ASC,\n304               p.title ASC\n305             LIMIT :limit\n306             \"\"\"\n307         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\routes\\terrain_cross_sections.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 288,
+      "line_range": [
+        288,
+        289,
+        290,
+        291,
+        292,
+        293,
+        294,
+        295,
+        296,
+        297,
+        298,
+        299,
+        300,
+        301,
+        302,
+        303,
+        304,
+        305,
+        306
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "174     try:\n175         db.execute(text(f\"UPDATE user_saved_layouts SET {', '.join(sets)} WHERE id = :id AND user_id = :uid\"), params)\n176         if payload.is_default:\n",
+      "col_offset": 24,
+      "end_col_offset": 108,
+      "filename": "backend/app\\routes\\user_layouts.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 175,
+      "line_range": [
+        175
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "47     try:\n48         with urlopen(request, timeout=timeout_s) as response:\n49             payload = json.loads(response.read().decode(\"utf-8\"))\n",
+      "col_offset": 13,
+      "end_col_offset": 48,
+      "filename": "backend/app\\services\\caltrans_postmile_reference.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 22,
+        "link": "https://cwe.mitre.org/data/definitions/22.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Audit url open for permitted schemes. Allowing use of file:/ or custom schemes is often unexpected.",
+      "line_number": 48,
+      "line_range": [
+        48
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b310-urllib-urlopen",
+      "test_id": "B310",
+      "test_name": "blacklist"
+    },
+    {
+      "code": "129     found = db.execute(\n130         text(f\"\"\"\n131             SELECT d.id FROM user_delegations d JOIN users u ON u.id = d.delegator_user_id AND u.is_active = 1\n132              WHERE d.delegate_user_id = :delegate AND d.delegator_user_id = :delegator AND {_RUNNING}\n133              LIMIT 1\n134         \"\"\"),\n135         {\"delegate\": int(delegate_id), \"delegator\": int(delegator_id)},\n",
+      "col_offset": 13,
+      "end_col_offset": 11,
+      "filename": "backend/app\\services\\delegations.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 130,
+      "line_range": [
+        130,
+        131,
+        132,
+        133,
+        134
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "142     rows = db.execute(\n143         text(f\"\"\"\n144             SELECT d.id, d.delegator_user_id, d.ends_on, COALESCE(u.full_name, u.email) AS name\n145               FROM user_delegations d JOIN users u ON u.id = d.delegator_user_id AND u.is_active = 1\n146              WHERE d.delegate_user_id = :uid AND {_RUNNING}\n147              ORDER BY name\n148         \"\"\"),\n149         {\"uid\": int(user_id)},\n",
+      "col_offset": 13,
+      "end_col_offset": 11,
+      "filename": "backend/app\\services\\delegations.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 143,
+      "line_range": [
+        143,
+        144,
+        145,
+        146,
+        147,
+        148
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "203     rows = db.execute(\n204         text(f\"\"\"\n205             SELECT d.delegator_user_id, d.delegate_user_id, COALESCE(u.full_name, u.email) AS name\n206               FROM user_delegations d JOIN users u ON u.id = d.delegator_user_id\n207              WHERE d.delegator_user_id IN :ids AND {_RUNNING}\n208         \"\"\").bindparams(bindparam(\"ids\", expanding=True)),\n209         {\"ids\": list(user_ids)},\n",
+      "col_offset": 13,
+      "end_col_offset": 11,
+      "filename": "backend/app\\services\\delegations.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 204,
+      "line_range": [
+        204,
+        205,
+        206,
+        207,
+        208
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "273     rows = db.execute(\n274         text(f\"\"\"\n275             SELECT u.id, COALESCE(u.full_name, u.email) AS name\n276               FROM org_user_profiles p JOIN users u ON u.id = p.user_id AND u.is_active = 1\n277              WHERE {where} AND u.id <> :me ORDER BY name\n278         \"\"\"),\n279         {**params, \"me\": int(actor[\"id\"])},\n",
+      "col_offset": 13,
+      "end_col_offset": 11,
+      "filename": "backend/app\\services\\delegations.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 274,
+      "line_range": [
+        274,
+        275,
+        276,
+        277,
+        278
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "298             ids.update(db.execute(\n299                 text(f\"SELECT user_id FROM {table} WHERE is_active = 1 AND TRIM(district) IN :districts\").bindparams(\n300                     bindparam(\"districts\", expanding=True)),\n",
+      "col_offset": 21,
+      "end_col_offset": 104,
+      "filename": "backend/app\\services\\delegations.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 299,
+      "line_range": [
+        299
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "47         ids.update(int(uid) for uid in db.execute(\n48             text(f\"SELECT user_id FROM {table} WHERE is_active = 1 AND TRIM(district) = :d\"), {\"d\": district}\n49         ).scalars())\n",
+      "col_offset": 17,
+      "end_col_offset": 91,
+      "filename": "backend/app\\services\\district_contact.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 48,
+      "line_range": [
+        48
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "84         try:\n85             with urlopen(url, timeout=_TIMEOUT) as resp:\n86                 raw = resp.read().decode(\"utf-8\", errors=\"ignore\")\n",
+      "col_offset": 17,
+      "end_col_offset": 47,
+      "filename": "backend/app\\services\\elevation_profile.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 22,
+        "link": "https://cwe.mitre.org/data/definitions/22.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Audit url open for permitted schemes. Allowing use of file:/ or custom schemes is often unexpected.",
+      "line_number": 85,
+      "line_range": [
+        85
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b310-urllib-urlopen",
+      "test_id": "B310",
+      "test_name": "blacklist"
+    },
+    {
+      "code": "95             try:\n96                 with urlopen(address, timeout=_TIMEOUT_S) as response:\n97                     data = response.read()\n",
+      "col_offset": 21,
+      "end_col_offset": 57,
+      "filename": "backend/app\\services\\elevation_tiles.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 22,
+        "link": "https://cwe.mitre.org/data/definitions/22.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Audit url open for permitted schemes. Allowing use of file:/ or custom schemes is often unexpected.",
+      "line_number": 96,
+      "line_range": [
+        96
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b310-urllib-urlopen",
+      "test_id": "B310",
+      "test_name": "blacklist"
+    },
+    {
+      "code": "117             return data\n118     except Exception:  # Not kept yet (or storage is down, which keeping below will log).\n119         pass\n120     data = _from_usgs(row, col)\n",
+      "col_offset": 4,
+      "end_col_offset": 12,
+      "filename": "backend/app\\services\\elevation_tiles.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 118,
+      "line_range": [
+        118,
+        119
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "226                     await file.seek(0)\n227                 except Exception:\n228                     pass\n229         return await original(\n",
+      "col_offset": 16,
+      "end_col_offset": 24,
+      "filename": "backend/app\\services\\field_media_ingest.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 227,
+      "line_range": [
+        227,
+        228
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "276             )\n277         except Exception:\n278             continue\n279         embedded = extract_embedded_photo_metadata(content)\n",
+      "col_offset": 8,
+      "end_col_offset": 20,
+      "filename": "backend/app\\services\\field_media_ingest.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Continue detected.",
+      "line_number": 277,
+      "line_range": [
+        277,
+        278
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b112_try_except_continue.html",
+      "test_id": "B112",
+      "test_name": "try_except_continue"
+    },
+    {
+      "code": "41     return (\n42         f\"(fa_a.submission_id = {s}.id OR EXISTS (\"\n43         f\"SELECT 1 FROM assessment_submissions fa_x WHERE fa_x.assessment_id = fa_a.id AND fa_x.submission_id = {s}.id))\"\n44     )\n",
+      "col_offset": 8,
+      "end_col_offset": 121,
+      "filename": "backend/app\\services\\form_access.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 42,
+      "line_range": [
+        42,
+        43
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "56     own = (\n57         f\"{s}.created_by_user_id = :fa_uid\"\n58         f\" OR EXISTS (SELECT 1 FROM submission_visibility fa_v WHERE fa_v.submission_id = {s}.id AND fa_v.user_id = :fa_uid)\"\n59         f\" OR EXISTS (SELECT 1 FROM submission_editors fa_e WHERE fa_e.submission_id = {s}.id AND fa_e.user_id = :fa_uid)\"\n60     )\n",
+      "col_offset": 8,
+      "end_col_offset": 122,
+      "filename": "backend/app\\services\\form_access.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 57,
+      "line_range": [
+        57,
+        58,
+        59
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "74     return (\n75         f\"({own}\"\n76         f\" OR ({s}.status = 'APPROVED' AND NOT EXISTS (SELECT 1 FROM assessments fa_a WHERE {_linked(s)}))\"\n77         f\" OR EXISTS (SELECT 1 FROM assessments fa_a WHERE {_linked(s)} AND ({' OR '.join(route)})))\"\n78     )\n",
+      "col_offset": 8,
+      "end_col_offset": 101,
+      "filename": "backend/app\\services\\form_access.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 75,
+      "line_range": [
+        75,
+        76,
+        77
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "85     row = db.execute(\n86         text(f\"SELECT 1 FROM submissions s WHERE s.id = :fa_sid AND {condition} LIMIT 1\"), params\n87     ).first()\n",
+      "col_offset": 13,
+      "end_col_offset": 88,
+      "filename": "backend/app\\services\\form_access.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 86,
+      "line_range": [
+        86
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "100         text(\n101             f\"\"\"\n102             SELECT\n103               EXISTS (SELECT 1 FROM attachment_links al WHERE al.attachment_id = :fa_att) AS on_forms,\n104               EXISTS (SELECT 1 FROM incident_attachments ia WHERE ia.attachment_id = :fa_att) AS on_report,\n105               EXISTS (\n106                 SELECT 1 FROM attachment_links al JOIN submissions s ON s.id = al.submission_id\n107                  WHERE al.attachment_id = :fa_att AND {condition}\n108               ) AS readable\n109             \"\"\"\n110         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\services\\form_access.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 101,
+      "line_range": [
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "46         text(\n47             f\"\"\"\n48             SELECT p.user_id, p.memo_keys, u.full_name, u.email\n49               FROM submission_presence p JOIN users u ON u.id = p.user_id\n50              WHERE p.submission_id = :sid AND p.user_id <> :uid AND {_ALIVE} AND {_WRITING}\n51              ORDER BY p.memo_active_at\n52             \"\"\"\n53         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\services\\form_presence.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 47,
+      "line_range": [
+        47,
+        48,
+        49,
+        50,
+        51,
+        52
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "122         text(\n123             f\"\"\"\n124             SELECT p.session_id, p.user_id, p.area, p.field, u.full_name, u.email,\n125                    CASE WHEN {_WRITING} THEN p.memo_keys END AS memos\n126               FROM submission_presence p JOIN users u ON u.id = p.user_id\n127              WHERE p.submission_id = :sid AND p.user_id <> :uid AND {_ALIVE}\n128              ORDER BY p.seen_at\n129             \"\"\"\n130         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\services\\form_presence.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 123,
+      "line_range": [
+        123,
+        124,
+        125,
+        126,
+        127,
+        128,
+        129
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "103 def config(db, district, *, lock=False):\n104     row = db.execute(text(\"SELECT * FROM maintenance_workflows WHERE district = :d\" + (\" FOR UPDATE\" if lock else \"\")),\n105                      {\"d\": district_code(district)}).mappings().first()\n",
+      "col_offset": 26,
+      "end_col_offset": 83,
+      "filename": "backend/app\\services\\maintenance_workflows.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 104,
+      "line_range": [
+        104
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "109 def run(db, incident_id, *, lock=False):\n110     row = db.execute(text(\"SELECT * FROM maintenance_workflow_runs WHERE incident_id = :id\" + (\" FOR UPDATE\" if lock else \"\")),\n111                      {\"id\": incident_id}).mappings().first()\n",
+      "col_offset": 26,
+      "end_col_offset": 91,
+      "filename": "backend/app\\services\\maintenance_workflows.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 110,
+      "line_range": [
+        110
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "300         text(\n301             f\"\"\"\n302             SELECT n.id, n.kind, n.title, n.body, n.link, n.incident_id, n.assessment_id, n.task_state,\n303                    n.created_at, n.read_at, a.full_name AS actor_name\n304               FROM user_notifications n LEFT JOIN users a ON a.id = n.actor_user_id\n305              WHERE n.user_id = :uid {\"AND n.id < :before\" if before_id else \"\"} {\"AND n.read_at IS NULL\" if unread_only else \"\"}\n306              ORDER BY n.id DESC\n307              LIMIT :limit\n308             \"\"\"\n309         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\services\\notification_feed.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 301,
+      "line_range": [
+        301,
+        302,
+        303,
+        304,
+        305,
+        306,
+        307,
+        308
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "246             client.quit()\n247         except Exception:\n248             # A relay that drops the connection after DATA has still accepted\n249             # the message; a failed QUIT must not turn a success into a retry.\n250             pass\n251 \n",
+      "col_offset": 8,
+      "end_col_offset": 16,
+      "filename": "backend/app\\services\\notifications.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 247,
+      "line_range": [
+        247,
+        248,
+        249,
+        250
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "298         text(\n299             f\"\"\"\n300             SELECT {_PENDING_COLUMNS}\n301             FROM incident_notifications n\n302             JOIN users u ON u.id = n.recipient_user_id\n303             WHERE {' AND '.join(where_parts)}\n304             ORDER BY n.id ASC\n305             LIMIT :row_limit\n306             \"\"\"\n307         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\services\\notifications.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 299,
+      "line_range": [
+        299,
+        300,
+        301,
+        302,
+        303,
+        304,
+        305,
+        306
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "457                 db.close()\n458             except Exception:\n459                 pass\n460 \n",
+      "col_offset": 12,
+      "end_col_offset": 20,
+      "filename": "backend/app\\services\\notifications.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 458,
+      "line_range": [
+        458,
+        459
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "490                 db.close()\n491             except Exception:\n492                 pass\n493     return summary\n",
+      "col_offset": 12,
+      "end_col_offset": 20,
+      "filename": "backend/app\\services\\notifications.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 491,
+      "line_range": [
+        491,
+        492
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "406         self._monotonic = time.monotonic\n407         self._jitter = lambda attempt: random.uniform(0.0, 0.5)\n408 \n",
+      "col_offset": 39,
+      "end_col_offset": 63,
+      "filename": "backend/app\\services\\offline_scene_builder.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 330,
+        "link": "https://cwe.mitre.org/data/definitions/330.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+      "line_number": 407,
+      "line_range": [
+        407
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random",
+      "test_id": "B311",
+      "test_name": "blacklist"
+    },
+    {
+      "code": "180                 v = urlunparse((p.scheme, netloc, p.path, \"\", \"\", \"\"))  # no userinfo/params/query/fragment\n181             except Exception:\n182                 continue\n183         out[k] = v\n",
+      "col_offset": 12,
+      "end_col_offset": 24,
+      "filename": "backend/app\\services\\offline_scene_context.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Continue detected.",
+      "line_number": 181,
+      "line_range": [
+        181,
+        182
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b112_try_except_continue.html",
+      "test_id": "B112",
+      "test_name": "try_except_continue"
+    },
+    {
+      "code": "90 def get_job(db: Session, job_id: int) -> dict | None:\n91     row = db.execute(text(f\"SELECT {_COLS} FROM offline_scene_jobs WHERE id=:id\"), {\"id\": job_id}).mappings().first()\n92     return dict(row) if row else None\n",
+      "col_offset": 26,
+      "end_col_offset": 80,
+      "filename": "backend/app\\services\\offline_scene_jobs.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 91,
+      "line_range": [
+        91
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "97     row = db.execute(\n98         text(f\"\"\"\n99             SELECT {_COLS} FROM offline_scene_jobs\n100             WHERE submission_id=:s AND status IN ({placeholders})\n101             ORDER BY id DESC LIMIT 1\n102         \"\"\"),\n103         {\"s\": submission_id},\n",
+      "col_offset": 13,
+      "end_col_offset": 11,
+      "filename": "backend/app\\services\\offline_scene_jobs.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 98,
+      "line_range": [
+        98,
+        99,
+        100,
+        101,
+        102
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "109     row = db.execute(\n110         text(f\"SELECT {_COLS} FROM offline_scene_jobs WHERE submission_id=:s ORDER BY id DESC LIMIT 1\"),\n111         {\"s\": submission_id},\n",
+      "col_offset": 13,
+      "end_col_offset": 102,
+      "filename": "backend/app\\services\\offline_scene_jobs.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 110,
+      "line_range": [
+        110
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "151     params[\"id\"] = job_id\n152     db.execute(text(f\"UPDATE offline_scene_jobs SET {sets} WHERE id=:id\"), params)\n153     db.commit()\n",
+      "col_offset": 20,
+      "end_col_offset": 72,
+      "filename": "backend/app\\services\\offline_scene_jobs.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 152,
+      "line_range": [
+        152
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "169     res = db.execute(\n170         text(f\"UPDATE offline_scene_jobs SET {sets} WHERE id=:id AND status NOT IN ({placeholders})\"),\n171         params,\n",
+      "col_offset": 13,
+      "end_col_offset": 100,
+      "filename": "backend/app\\services\\offline_scene_jobs.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 170,
+      "line_range": [
+        170
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "212     existing = db.execute(\n213         text(f\"\"\"\n214             SELECT {_COLS} FROM offline_scene_jobs\n215             WHERE submission_id=:s AND status IN ({placeholders})\n216             ORDER BY id DESC LIMIT 1\n217         \"\"\"),\n218         {\"s\": submission_id},\n",
+      "col_offset": 13,
+      "end_col_offset": 11,
+      "filename": "backend/app\\services\\offline_scene_jobs.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 213,
+      "line_range": [
+        213,
+        214,
+        215,
+        216,
+        217
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "340     res = db.execute(\n341         text(f\"\"\"\n342             UPDATE offline_scene_jobs\n343             SET status='QUEUED', progress_pct=0,\n344                 status_message='Requeued after interruption',\n345                 worker_id=NULL, claimed_at=NULL\n346             WHERE status IN ({placeholders})\n347               AND updated_at < (NOW() - INTERVAL :sec SECOND)\n348         \"\"\"),\n349         {\"sec\": stale_seconds},\n",
+      "col_offset": 13,
+      "end_col_offset": 11,
+      "filename": "backend/app\\services\\offline_scene_jobs.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 341,
+      "line_range": [
+        341,
+        342,
+        343,
+        344,
+        345,
+        346,
+        347,
+        348
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "723         text(\n724             f\"\"\"\n725             SELECT id, rule_kind, class_code, marker, title_pattern, level_code,\n726                    title, eris_role, is_supervisor, priority, notes, is_active\n727               FROM org_classifications\n728               {where}\n729              ORDER BY priority ASC, rule_kind ASC, class_code ASC, id ASC\n730             \"\"\"\n731         )\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\services\\org_directory.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 724,
+      "line_range": [
+        724,
+        725,
+        726,
+        727,
+        728,
+        729,
+        730
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "254         rows = db.execute(\n255             text(f\"SELECT user_id, district FROM {table} WHERE is_active = 1 AND user_id IN :ids ORDER BY district\").bindparams(\n256                 bindparam(\"ids\", expanding=True)\n",
+      "col_offset": 17,
+      "end_col_offset": 115,
+      "filename": "backend/app\\services\\org_tree.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 255,
+      "line_range": [
+        255
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "270         text(\n271             f\"\"\"\n272             SELECT u.id, u.full_name, u.email, u.is_active,\n273                    p.tree_position, p.office_id, p.branch_id, p.availability, p.available_until\n274               FROM users u\n275               JOIN org_user_profiles p ON p.user_id = u.id\n276              WHERE {where}\n277              ORDER BY u.full_name, u.id\n278             \"\"\"\n279         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\services\\org_tree.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 271,
+      "line_range": [
+        271,
+        272,
+        273,
+        274,
+        275,
+        276,
+        277,
+        278
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "685     if sets:\n686         db.execute(text(f\"UPDATE org_branches SET {', '.join(sets)}, updated_at = NOW() WHERE id = :bid\"), params)\n687 \n",
+      "col_offset": 24,
+      "end_col_offset": 104,
+      "filename": "backend/app\\services\\org_tree.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 686,
+      "line_range": [
+        686
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "785     db.execute(\n786         text(f\"UPDATE org_user_profiles SET {assignments}, source = 'MANUAL', updated_at = NOW() WHERE user_id = :uid\"),\n787         {**clean, \"uid\": int(user_id)},\n",
+      "col_offset": 13,
+      "end_col_offset": 118,
+      "filename": "backend/app\\services\\org_tree.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 786,
+      "line_range": [
+        786
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "99     approved = (\n100         f\"EXISTS (SELECT 1 FROM assessments pa\"\n101         f\" WHERE pa.incident_id = {alias}.id AND pa.state IN {_STATES_SQL})\"\n102     )\n",
+      "col_offset": 8,
+      "end_col_offset": 76,
+      "filename": "backend/app\\services\\public_visibility.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 100,
+      "line_range": [
+        100,
+        101
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "105     closed_at_triage = (\n106         f\"({alias}.triage_disposition IN ('NO_ASSESSMENT_REQUIRED','DUPLICATE_OR_LINKED')\"\n107         f\" AND NOT EXISTS (SELECT 1 FROM assessments pa2 WHERE pa2.incident_id = {alias}.id))\"\n108     )\n",
+      "col_offset": 8,
+      "end_col_offset": 94,
+      "filename": "backend/app\\services\\public_visibility.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 106,
+      "line_range": [
+        106,
+        107
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "134     row = db.execute(\n135         text(f\"SELECT 1 FROM incidents i WHERE i.id = :iid AND {where_sql} LIMIT 1\"),\n136         {\"iid\": int(incident_id)},\n",
+      "col_offset": 13,
+      "end_col_offset": 83,
+      "filename": "backend/app\\services\\public_visibility.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 135,
+      "line_range": [
+        135
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "157     rows = db.execute(\n158         text(f\"SELECT i.id FROM incidents i WHERE i.id IN ({placeholders}) AND {where_sql}\"),\n159         params,\n",
+      "col_offset": 13,
+      "end_col_offset": 91,
+      "filename": "backend/app\\services\\public_visibility.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 158,
+      "line_range": [
+        158
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "188         text(\n189             f\"\"\"\n190             SELECT 1\n191             FROM assessments a\n192             WHERE a.state IN {_STATES_SQL}\n193               AND (\n194                 a.submission_id = :sid\n195                 OR EXISTS (\n196                   SELECT 1 FROM assessment_submissions s\n197                   WHERE s.assessment_id = a.id AND s.submission_id = :sid\n198                 )\n199               )\n200             LIMIT 1\n201             \"\"\"\n202         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\services\\public_visibility.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 189,
+      "line_range": [
+        189,
+        190,
+        191,
+        192,
+        193,
+        194,
+        195,
+        196,
+        197,
+        198,
+        199,
+        200,
+        201
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "219         text(\n220             f\"\"\"\n221             SELECT 1\n222             FROM attachment_links al\n223             JOIN assessments a\n224               ON a.submission_id = al.submission_id\n225               OR EXISTS (\n226                 SELECT 1 FROM assessment_submissions s\n227                 WHERE s.assessment_id = a.id AND s.submission_id = al.submission_id\n228               )\n229             WHERE al.attachment_id = :aid\n230               AND a.state IN {_STATES_SQL}\n231             LIMIT 1\n232             \"\"\"\n233         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\services\\public_visibility.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 220,
+      "line_range": [
+        220,
+        221,
+        222,
+        223,
+        224,
+        225,
+        226,
+        227,
+        228,
+        229,
+        230,
+        231,
+        232
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "45     request = urllib.request.Request(settings.EXPO_PUSH_URL, data=json.dumps(messages).encode(\"utf-8\"), headers=headers, method=\"POST\")\n46     with urllib.request.urlopen(request, timeout=15) as response:  # noqa: S310 - fixed https endpoint\n47         return json.loads(response.read().decode(\"utf-8\")).get(\"data\") or []\n",
+      "col_offset": 9,
+      "end_col_offset": 52,
+      "filename": "backend/app\\services\\push.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 22,
+        "link": "https://cwe.mitre.org/data/definitions/22.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Audit url open for permitted schemes. Allowing use of file:/ or custom schemes is often unexpected.",
+      "line_number": 46,
+      "line_range": [
+        46
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b310-urllib-urlopen",
+      "test_id": "B310",
+      "test_name": "blacklist"
+    },
+    {
+      "code": "209                     finished_at=_now())\n210         except Exception:\n211             pass\n212     finally:\n",
+      "col_offset": 8,
+      "end_col_offset": 16,
+      "filename": "backend/app\\services\\road_inventory_import_jobs.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 210,
+      "line_range": [
+        210,
+        211
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "223     db.execute(\n224         text(f\"UPDATE road_inventory_import_jobs SET {set_clause} WHERE job_uuid = :job_uuid\"),\n225         {**fields, \"job_uuid\": job_uuid},\n",
+      "col_offset": 13,
+      "end_col_offset": 93,
+      "filename": "backend/app\\services\\road_inventory_import_jobs.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 224,
+      "line_range": [
+        224
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "163             text(\n164                 f\"\"\"\n165                 INSERT INTO {table} (submission_id, user_id, granted_by_user_id) VALUES (:sid, :uid, :by)\n166                 ON DUPLICATE KEY UPDATE granted_by_user_id = VALUES(granted_by_user_id)\n167                 \"\"\"\n168             ),\n",
+      "col_offset": 16,
+      "end_col_offset": 19,
+      "filename": "backend/app\\services\\sharing.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 164,
+      "line_range": [
+        164,
+        165,
+        166,
+        167
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "174     for table in (\"submission_visibility\", \"submission_editors\"):\n175         db.execute(text(f\"DELETE FROM {table} WHERE submission_id = :sid AND user_id = :uid\"), {\"sid\": int(submission_id), \"uid\": int(user_id)})\n176 \n",
+      "col_offset": 24,
+      "end_col_offset": 92,
+      "filename": "backend/app\\services\\sharing.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 175,
+      "line_range": [
+        175
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "244     row = db.execute(\n245         text(f\"SELECT * FROM submission_shares WHERE id = :id{' FOR UPDATE' if lock else ''}\"), {\"id\": int(share_id)}\n246     ).mappings().first()\n",
+      "col_offset": 13,
+      "end_col_offset": 93,
+      "filename": "backend/app\\services\\sharing.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 245,
+      "line_range": [
+        245
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "515         text(\n516             f\"\"\"\n517             SELECT r.id AS review_id, r.kind, r.unit_type, r.unit_id, s.id AS share_id, s.status, s.created_at,\n518                    s.submission_id, sub.title AS submission_title, sub.created_by_user_id AS owner_id,\n519                    s.sharer_user_id, g.full_name AS sharer_name, g.email AS sharer_email,\n520                    s.recipient_user_id, t.full_name AS recipient_name, t.email AS recipient_email,\n521                    o.full_name AS owner_name\n522               FROM submission_share_reviews r\n523               JOIN submission_shares s ON s.id = r.share_id\n524               JOIN submissions sub ON sub.id = s.submission_id\n525               JOIN users g ON g.id = s.sharer_user_id\n526               JOIN users t ON t.id = s.recipient_user_id\n527               JOIN users o ON o.id = sub.created_by_user_id\n528              WHERE r.decision = 'PENDING' AND s.status IN ('PENDING', 'ACTIVE') AND ({\" OR \".join(clauses)})\n529              ORDER BY s.created_at DESC, r.id DESC\n530             \"\"\"\n531         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\services\\sharing.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 516,
+      "line_range": [
+        516,
+        517,
+        518,
+        519,
+        520,
+        521,
+        522,
+        523,
+        524,
+        525,
+        526,
+        527,
+        528,
+        529,
+        530
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "578         text(\n579             f\"\"\"\n580             SELECT {_FORM_COLUMNS}, s.created_at AS shared_at, COALESCE(u.full_name, u.email) AS shared_by\n581               FROM submission_shares s\n582               JOIN submissions sub ON sub.id = s.submission_id\n583               JOIN users u ON u.id = s.sharer_user_id\n584               LEFT JOIN submission_gisa g ON g.submission_id = sub.id\n585              WHERE s.recipient_user_id = :uid AND s.status = 'ACTIVE' AND {_IN_PROGRESS}\n586              ORDER BY s.created_at DESC, s.id DESC\n587             \"\"\"\n588         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\services\\sharing.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 579,
+      "line_range": [
+        579,
+        580,
+        581,
+        582,
+        583,
+        584,
+        585,
+        586,
+        587
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "592         text(\n593             f\"\"\"\n594             SELECT {_FORM_COLUMNS}\n595               FROM submissions sub\n596               LEFT JOIN submission_gisa g ON g.submission_id = sub.id\n597              WHERE sub.created_by_user_id = :uid AND {_IN_PROGRESS}\n598                AND NOT EXISTS (SELECT 1 FROM assessments a WHERE a.submission_id = sub.id)\n599                AND NOT EXISTS (SELECT 1 FROM assessment_submissions x WHERE x.submission_id = sub.id)\n600              ORDER BY sub.created_at DESC, sub.id DESC\n601             \"\"\"\n602         ),\n",
+      "col_offset": 12,
+      "end_col_offset": 15,
+      "filename": "backend/app\\services\\sharing.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 593,
+      "line_range": [
+        593,
+        594,
+        595,
+        596,
+        597,
+        598,
+        599,
+        600,
+        601
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "75     rows = db.execute(\n76         text(f\"SELECT id, full_name, email FROM users WHERE id IN ({tokens})\"),\n77         params,\n",
+      "col_offset": 13,
+      "end_col_offset": 77,
+      "filename": "backend/app\\services\\workflow_tree.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 76,
+      "line_range": [
+        76
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "245         _client().remove_object(bucket_name, object_key)\n246     except Exception:  # best effort: an orphaned object costs space, not correctness\n247         pass\n",
+      "col_offset": 4,
+      "end_col_offset": 12,
+      "filename": "backend/app\\storage.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 246,
+      "line_range": [
+        246,
+        247
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "46 MIN_PASSWORD_LENGTH = 12\n47 PASSWORD_ENV = \"ERIS_ADMIN_PASSWORD\"\n48 \n",
+      "col_offset": 15,
+      "end_col_offset": 36,
+      "filename": "backend/app\\tools\\create_admin.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'ERIS_ADMIN_PASSWORD'",
+      "line_number": 47,
+      "line_range": [
+        47
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
+      "test_id": "B105",
+      "test_name": "hardcoded_password_string"
+    },
+    {
+      "code": "93             params[\"n\"] = full_name.strip()\n94         db.execute(text(f\"UPDATE users SET {', '.join(sets)} WHERE id = :id\"), params)\n95 \n",
+      "col_offset": 24,
+      "end_col_offset": 76,
+      "filename": "backend/app\\tools\\create_admin.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 94,
+      "line_range": [
+        94
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "80                 db.close()\n81             except Exception:\n82                 pass\n83 \n",
+      "col_offset": 12,
+      "end_col_offset": 20,
+      "filename": "backend/app\\tools\\flush_email_outbox.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 81,
+      "line_range": [
+        81,
+        82
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "18             for table in (\"users\", \"submissions\", \"incidents\", \"attachments\"):\n19                 if table in tables and db.execute(text(f\"SELECT 1 FROM {table} LIMIT 1\")).first():\n20                     raise RuntimeError(f\"Unversioned database contains {table}; refusing to stamp\")\n",
+      "col_offset": 55,
+      "end_col_offset": 87,
+      "filename": "backend/app\\tools\\prepare_database.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 19,
+      "line_range": [
+        19
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    }
+  ]
+}

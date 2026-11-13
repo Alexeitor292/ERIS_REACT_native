@@ -10,7 +10,7 @@
 #
 # scan: writes OUTDIR/NAME.cdx.json (CycloneDX SBOM of every package) and
 #   OUTDIR/NAME.vulns.json, and exits 1 when the image has a vulnerability of
-#   TRIVY_SEVERITY (default HIGH,CRITICAL) with a fix available, or an embedded
+#   TRIVY_SEVERITY (default all severities), even without a fix, or an embedded
 #   secret. Accepted exceptions live in .trivyignore, each with a reason and an
 #   expiry, reviewed like code.
 # sign: signs the digest (never a tag) with the Caltrans cosign key and attaches
@@ -23,9 +23,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-TRIVY_IMAGE="${TRIVY_IMAGE:-docker.io/aquasec/trivy:0.58.1}"
+TRIVY_IMAGE="${TRIVY_IMAGE:-docker.io/aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb}"
 COSIGN_IMAGE="${COSIGN_IMAGE:-ghcr.io/sigstore/cosign/cosign:v2.4.1}"
-TRIVY_SEVERITY="${TRIVY_SEVERITY:-HIGH,CRITICAL}"
+TRIVY_SEVERITY="${TRIVY_SEVERITY:-UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL}"
 IGNORE_FILE="$ROOT/.trivyignore"
 
 die() { echo "release-gate: $*" >&2; exit 2; }
@@ -71,15 +71,15 @@ case "${1:-}" in
     trivy "$work" image --input /work/image.tar --format cyclonedx --output /work/sbom.cdx.json
     gate=0
     trivy "$work" image --input /work/image.tar --scanners vuln,secret --severity "$TRIVY_SEVERITY" \
-      --ignore-unfixed --ignorefile /policy/.trivyignore --exit-code 1 --format json --output /work/vulns.json || gate=$?
+      --ignorefile /policy/.trivyignore --exit-code 1 --format json --output /work/vulns.json || gate=$?
     cp "$work/sbom.cdx.json" "$out/$name.cdx.json"
     cp "$work/vulns.json" "$out/$name.vulns.json"
     trivy "$work" convert --format table /work/vulns.json || true
     if [[ "$gate" != 0 ]]; then
-      echo "release-gate: $name FAILED: fixable $TRIVY_SEVERITY vulnerabilities or embedded secrets (see $name.vulns.json)" >&2
+      echo "release-gate: $name FAILED: $TRIVY_SEVERITY vulnerabilities or embedded secrets (see $name.vulns.json)" >&2
       exit 1
     fi
-    echo "release-gate: $name passed ($TRIVY_SEVERITY with a fix available, secrets); SBOM $name.cdx.json"
+    echo "release-gate: $name passed ($TRIVY_SEVERITY, including unfixed findings, secrets); SBOM $name.cdx.json"
     ;;
   sign)
     ref="${2:?$0 sign IMAGE@sha256:... SBOM}" sbom="${3:?sbom}"

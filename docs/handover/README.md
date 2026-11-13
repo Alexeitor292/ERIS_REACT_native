@@ -4,6 +4,43 @@ For whoever takes over ERIS: the Caltrans IT staff who run it, and the
 developer or intern who maintains the code. Read this first; it links to
 everything else.
 
+**Handoff update — November 13, 2026:** ERIS is owned by **Deh Jeng Jang**.
+The outgoing maintainer leaves Caltrans at the end of November. Staging is
+currently hosted on personal servers; Caltrans IT still needs to be approached
+to provision agency staging and subsequently production. Hostnames, technical
+successor and IT service owner are pending assignment.
+
+| Handoff document | Use it for |
+| --- | --- |
+| [Environment setup worksheet](environment-setup.md) | Exact local/staging/production configuration, matching credentials and feature settings |
+| [Remaining work register](open-work.md) | Priorities, accountable roles and completion evidence |
+| [Personal-server transfer](server-transfer.md) | IT request, inventory, matched backup, migration, cutover and data disposition |
+| [Acceptance record](acceptance.md) | Assign owners/hosts and record independent setup, recovery and go-live evidence |
+| [Licensing bill of materials](../caltrans/licensing-bill-of-materials.md) | 300-device Esri Lite assessment, service usage, Apple distribution, Microsoft and developer tooling |
+| [Security review](../security/review-2026-11-13.md) | Dated scans, remediation, residual findings and production gates |
+
+## Build and receive the source package
+
+From a clean checkout of the accepted commit, run:
+
+```powershell
+python scripts/handover/build_package.py --output ../ERIS-handoff-release --include-history
+```
+
+The output directory must be new and outside the checkout. It contains all
+committed source/docs in a ZIP, `manifest.json` with the source commit and
+per-file SHA-256 values, `SHA256SUMS` and `START-HERE.txt`. Verify the ZIP with
+`Get-FileHash <archive.zip> -Algorithm SHA256` (Linux: `sha256sum -c SHA256SUMS`).
+Extract it and start with this guide. The builder refuses a dirty checkout and
+restricted tracked config/key paths. Source scanning is a separate release gate.
+
+The source ZIP has no Git history, live DB/files, ignored env files, private keys,
+or installed dependencies. `--include-history` also creates a checksummed
+`ERIS-history.bundle` containing all Git refs/history; scan history for secrets
+before including it. Restore with `git clone -b <manifest-branch> ERIS-history.bundle ERIS`.
+Obtain agency repository access for future changes. Transfer the [secure companion](server-transfer.md#secure-companion-to-the-source-package)
+separately; source delivery alone does not constitute operational acceptance.
+
 ## What you are taking over
 
 ERIS is a web application, an iPhone app and a small server stack:
@@ -60,9 +97,9 @@ to Caltrans before the handover is complete. Tick them off in a tracked ticket.
       required today; the iOS workflow uses only the built-in token).
 - [ ] **Two Caltrans administrators** are linked to their Entra accounts in ERIS,
       and `bash deploy/podman/eris-pod.sh handover-check` passes.
-- [ ] **Apple Developer Enterprise account.** Caltrans staff hold the Account
-      Holder or Admin role, the distribution certificate, the in-house
-      provisioning profile and the APNs auth key (`.p8`).
+- [ ] **Apple distribution.** Verify the existing developer membership type and
+      select an approved custom-app or Enterprise path (see licensing). Caltrans
+      staff hold the Account Holder/Admin roles, signing assets and APNs key.
 - [ ] **Signing and secrets.** The cosign key pair, the Entra client certificate and
       every `deploy/podman/*.env` value are in Caltrans's approved secret store, not
       on a personal machine or in email.
@@ -71,10 +108,10 @@ to Caltrans before the handover is complete. Tick them off in a tracked ticket.
       Caltrans whether its data is deleted or handed over, then shut it down. It is
       personal infrastructure and must not keep a copy of Caltrans data.
 - [ ] **The Caltrans Mac mini** used for iOS builds, with Claude Code and Xcode.
-      Hand it over with its login and the `claude/ios-swift-app` branch state recorded.
+      Hand it over with agency-managed access and the accepted source commit recorded.
 - [ ] **Open work** is merged or recorded: open pull requests, the iOS port status
-      ([ios/README.md on the iOS branch](../development/ios.md)), and the open items
-      in the [readiness audit](../caltrans/readiness-audit.md#open--needs-a-caltrans-decision-or-further-work).
+      ([native port status](../../ios/README.md#port-status)), and the current
+      [remaining work register](open-work.md). Swift is on main; Expo is retired.
 - [ ] **Remove the author's own access** after the above: ERIS admin role, Jenkins,
       Harbor, Apple account, GitHub organization.
 

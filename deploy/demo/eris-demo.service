@@ -1,0 +1,14 @@
+[Unit]
+Description=ERIS isolated static guided demo
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Restart=on-failure
+RestartSec=3
+ExecStartPre=-/usr/bin/podman rm -f eris-demo
+ExecStart=/usr/bin/podman run --rm --name eris-demo --publish 192.168.20.216:8081:8080 --read-only --user 101:101 --tmpfs /var/cache/nginx:rw,mode=1777,size=16m --tmpfs /var/run:rw,mode=1777,size=1m --cap-drop ALL --security-opt no-new-privileges --memory 128m --cpus 0.5 --entrypoint /usr/sbin/nginx localhost/eris/guided-demo:20261109-internal -g "daemon off;"
+ExecStop=/usr/bin/podman stop -t 10 eris-demo
+
+[Install]
+WantedBy=default.target

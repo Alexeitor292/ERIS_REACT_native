@@ -26,7 +26,6 @@ cosign.key
 !/deploy/compose/.env.example
 !/deploy/compose/.env.proxmox.example
 !/web/.env.example
-!/mobile/.env.example
 
 # ---- python ----
 __pycache__/
@@ -42,7 +41,6 @@ coverage/
 
 # ---- misc ----
 .DS_Store
-mobile/.git.nested.backup/
 tmp_gisa_xfa/
 backups/
 
@@ -51,18 +49,14 @@ backups/
 .cursor/
 .aider*
 
-# ---- expo / eas / react-native native artifacts ----
-mobile/.expo/
-mobile/.expo-shared/
-mobile/android/
-mobile/ios/
-mobile/android/local.properties
+# ---- native build artifacts ----
 *.apk
 *.aab
 *.ipa
 
 # ---- web build cache ----
 web/.vite/
+web/dist-demo/
 .rocketride/
 
 # ---- alembic ----

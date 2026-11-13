@@ -1,14 +1,17 @@
 # ERIS iOS app (native Swift) — build specification
 
-**Decision, 2026-10-28:** the Caltrans ERIS mobile app will be a native **Swift** iOS app.
-Caltrans has the **Apple Developer Enterprise Program**, so the app is signed for in-house
-distribution and published through **Intune as a line-of-business app**; staff install it from
-**Company Portal**. There is no Android app and none is planned. Push notifications are
-allowed and use Apple Push Notification service (APNs).
-It is built in Xcode on the Caltrans-issued Mac mini. Expo/React Native is not used for the
-Caltrans release. The Expo project in [`mobile/`](../../mobile) stays as the **reference
-implementation** until the Swift app reaches parity. Its TypeScript logic and unit tests are
-the behaviour to match.
+**Status, 2026-11-13:** the supported mobile application is native Swift in
+[`ios/`](../../ios), built with Xcode on the Caltrans Mac. Expo is retired.
+There is no planned Android app. See the [native port status](../../ios/README.md#port-status)
+for implemented features and device tests still needed.
+
+Caltrans reports an existing Apple developer membership and Intune/Company
+Portal, but its **standard vs Enterprise membership has not been verified**.
+The in-house IPA instructions below apply only to an approved Enterprise
+membership. A standard membership requires an eligible alternative, such as
+private custom-app distribution through Apple Business and Intune. See the
+[licensing bill of materials](../caltrans/licensing-bill-of-materials.md#apple-signing-and-company-portal)
+before choosing signing and distribution. Push uses APNs.
 
 This document is the contract between the Swift app and the ERIS API. **The server needs no
 change**: everything below already exists.
@@ -129,7 +132,10 @@ are the reference.
 
 Do not call `/auth/login`: the Caltrans deployment is Entra-only.
 
-## What else must be ported
+## Historical Expo-to-Swift porting map
+
+This table describes the original migration plan. It is not a list of currently
+unimplemented screens; use the native README for present implementation status.
 
 | Expo app | Swift replacement |
 | --- | --- |

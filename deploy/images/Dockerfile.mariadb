@@ -1,0 +1,11 @@
+# Candidate agency mirror: retain MariaDB's official entrypoint/server, update
+# OS packages and rebuild gosu with a patched Go toolchain. Scan/sign the result
+# before setting MARIADB_SOURCE in Jenkins; do not overwrite the upstream tag.
+FROM golang:1.27.4-alpine@sha256:0a5f7fe796599ff487605987432e7619ae45beeb2fba4c2ce0b907879932aebf AS gosu
+ENV CGO_ENABLED=0 GOTOOLCHAIN=local
+RUN go install github.com/tianon/gosu@1.20
+
+FROM mariadb:11@sha256:d36f18d65a0459510b8b0f643b226a6d299e3206486e2b64ff20754a6d291707
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+COPY --from=gosu /go/bin/gosu /usr/local/bin/gosu
+RUN gosu nobody id && gosu --version

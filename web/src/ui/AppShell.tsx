@@ -18,6 +18,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
+import { appConfig } from "../config";
 import NotificationBell from "../features/notifications/NotificationBell";
 import { useUiSettings } from "./UiSettingsContext";
 import HeaderSearch from "./HeaderSearch";
@@ -267,6 +268,7 @@ export default function AppShell({ title, children, workspace = false }: { title
             <HeaderSearch pages={pages} searchRecords={!!me && isOperationalUser(me.roles)} />
           </div>
           <div className="flex items-center justify-end gap-1.5">
+            {me && appConfig.guidedDemoEnabled ? <a href="/demo/" className="rounded-md border border-[var(--line)] px-2.5 py-1.5 text-xs font-semibold hover:bg-[var(--panel-soft)]">Guided Demo</a> : null}
             {me && (!isPublicOnly(me.roles) || hasMaintenanceDuties(me)) ? <NotificationBell /> : null}
             <span aria-hidden className="mx-1 hidden h-6 w-px bg-[var(--line)] sm:block" />
             <ProfileMenu orgLine={orgLine} />

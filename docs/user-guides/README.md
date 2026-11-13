@@ -14,6 +14,7 @@ diagram), then step by step how to do it. The rules behind each step are in
 | Guest | [Reading the record](reading-the-record.md) |
 | Administrator | [Administration](administration.md), [maintenance workflows](maintenance-workflows.md) |
 | Everyone | [Signing in, My Work and notifications](everyday-use.md) |
+| Trying ERIS on staging | [Isolated guided demo](guided-demo.md) |
 
 ## Who does what
 

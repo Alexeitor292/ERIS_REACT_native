@@ -1,5 +1,7 @@
 # Caltrans deployment readiness audit — 2026-10-28
 
+> Historical audit. For November 2026 status, see the [current work register](../handover/open-work.md). Swift is implemented in `ios/` on main; Expo is retired. Earlier mobile testing and future-tense descriptions below are retained as the original audit record.
+
 An audit of the implementation against the [IT briefing](it-deployment-brief.md),
 the [Podman runbook](../operations/caltrans-podman.md), [`Jenkinsfile.podman`](../../deploy/ci/Jenkinsfile.podman) and
 [`deploy/podman`](../../deploy/podman). It records what changed on the

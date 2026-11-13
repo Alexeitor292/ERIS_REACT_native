@@ -8,18 +8,17 @@ ERIS has **66 tables** in MariaDB. File bytes (photos, PDFs, terrain packages) a
 
 ```mermaid
 flowchart LR
-    identity_and_access["Identity and access<br/>8 tables"]
+    identity_and_access["Identity and access<br/>10 tables"]
     organization["Organization<br/>10 tables"]
     incidents["Incidents<br/>8 tables"]
     assessments["Assessments<br/>4 tables"]
     submissions_gisa["Submissions (GISA)<br/>12 tables"]
     attachments["Attachments<br/>4 tables"]
-    notifications["Notifications<br/>3 tables"]
+    notifications["Notifications<br/>4 tables"]
     maintenance_workflows["Maintenance workflows<br/>3 tables"]
     projects["Projects<br/>1 tables"]
     road_inventory["Road inventory<br/>4 tables"]
     terrain_and_offline_scenes["Terrain and offline scenes<br/>6 tables"]
-    other["Other<br/>3 tables"]
     assessments -->|7 FK| identity_and_access
     assessments -->|4 FK| incidents
     assessments -->|2 FK| organization
@@ -31,11 +30,10 @@ flowchart LR
     incidents -->|2 FK| road_inventory
     incidents -->|1 FK| submissions_gisa
     maintenance_workflows -->|2 FK| incidents
-    notifications -->|4 FK| identity_and_access
+    notifications -->|5 FK| identity_and_access
     notifications -->|1 FK| incidents
+    notifications -->|1 FK| submissions_gisa
     organization -->|7 FK| identity_and_access
-    other -->|7 FK| identity_and_access
-    other -->|1 FK| submissions_gisa
     projects -->|1 FK| identity_and_access
     submissions_gisa -->|3 FK| attachments
     submissions_gisa -->|16 FK| identity_and_access
@@ -50,18 +48,17 @@ An arrow points from the domain holding the foreign key to the domain it referen
 
 ## Contents
 
-- [Identity and access](#identity-and-access) (8 tables)
+- [Identity and access](#identity-and-access) (10 tables)
 - [Organization](#organization) (10 tables)
 - [Incidents](#incidents) (8 tables)
 - [Assessments](#assessments) (4 tables)
 - [Submissions (GISA)](#submissions-gisa) (12 tables)
 - [Attachments](#attachments) (4 tables)
-- [Notifications](#notifications) (3 tables)
+- [Notifications](#notifications) (4 tables)
 - [Maintenance workflows](#maintenance-workflows) (3 tables)
 - [Projects](#projects) (1 tables)
 - [Road inventory](#road-inventory) (4 tables)
 - [Terrain and offline scenes](#terrain-and-offline-scenes) (6 tables)
-- [Other](#other) (3 tables)
 
 ## Identity and access
 
@@ -69,6 +66,15 @@ Accounts, roles, sessions, Entra links, first-admin marker.
 
 ```mermaid
 erDiagram
+    delegated_actions {
+        bigint id PK
+        bigint delegation_id FK
+        bigint actor_user_id FK
+        bigint acting_for_user_id FK
+        varchar method
+        varchar path
+        datetime created_at
+    }
     deployment_bootstrap {
         varchar name PK
         datetime completed_at
@@ -84,6 +90,18 @@ erDiagram
         bigint id PK
         varchar name UK
         varchar description
+    }
+    user_delegations {
+        bigint id PK
+        bigint delegator_user_id FK
+        bigint delegate_user_id FK
+        date starts_on
+        date ends_on
+        varchar note
+        bigint created_by_user_id FK
+        datetime created_at
+        datetime cancelled_at
+        bigint cancelled_by_user_id FK
     }
     user_external_identities {
         bigint id PK
@@ -138,7 +156,14 @@ erDiagram
         datetime updated_at
     }
     roles ||--o{ user_roles : "role_id"
+    user_delegations ||--o{ delegated_actions : "delegation_id"
+    users |o--o{ user_delegations : "cancelled_by_user_id"
     users |o--o{ user_external_identities : "linked_by_user_id"
+    users ||--o{ delegated_actions : "acting_for_user_id"
+    users ||--o{ delegated_actions : "actor_user_id"
+    users ||--o{ user_delegations : "created_by_user_id"
+    users ||--o{ user_delegations : "delegate_user_id"
+    users ||--o{ user_delegations : "delegator_user_id"
     users ||--o{ user_external_identities : "user_id"
     users ||--o{ user_roles : "user_id"
     users ||--o{ user_saved_layouts : "user_id"
@@ -969,6 +994,16 @@ The notification feed, push devices and the email outbox.
 
 ```mermaid
 erDiagram
+    immediate_action_deliveries {
+        bigint id PK
+        bigint submission_id FK
+        bigint actor_user_id FK
+        char client_uuid UK
+        longtext actions_json
+        text description
+        datetime written_at
+        datetime created_at
+    }
     incident_notifications {
         bigint id PK
         bigint incident_id FK
@@ -1009,11 +1044,16 @@ erDiagram
     incidents {
         bigint id PK
     }
+    submissions {
+        bigint id PK
+    }
     users {
         bigint id PK
     }
     incidents ||--o{ incident_notifications : "incident_id"
+    submissions ||--o{ immediate_action_deliveries : "submission_id"
     users |o--o{ user_notifications : "actor_user_id"
+    users ||--o{ immediate_action_deliveries : "actor_user_id"
     users ||--o{ incident_notifications : "recipient_user_id"
     users ||--o{ push_devices : "user_id"
     users ||--o{ user_notifications : "user_id"
@@ -1300,58 +1340,4 @@ erDiagram
     users |o--o{ offline_scene_jobs : "requested_by"
     users |o--o{ offline_scene_packages : "uploaded_by"
     users ||--o{ terrain_cross_sections : "created_by_user_id"
-```
-
-## Other
-
-Tables not yet assigned to a domain (add a rule in generate_schema_docs.py).
-
-```mermaid
-erDiagram
-    delegated_actions {
-        bigint id PK
-        bigint delegation_id FK
-        bigint actor_user_id FK
-        bigint acting_for_user_id FK
-        varchar method
-        varchar path
-        datetime created_at
-    }
-    immediate_action_deliveries {
-        bigint id PK
-        bigint submission_id FK
-        bigint actor_user_id FK
-        char client_uuid UK
-        longtext actions_json
-        text description
-        datetime written_at
-        datetime created_at
-    }
-    user_delegations {
-        bigint id PK
-        bigint delegator_user_id FK
-        bigint delegate_user_id FK
-        date starts_on
-        date ends_on
-        varchar note
-        bigint created_by_user_id FK
-        datetime created_at
-        datetime cancelled_at
-        bigint cancelled_by_user_id FK
-    }
-    submissions {
-        bigint id PK
-    }
-    users {
-        bigint id PK
-    }
-    submissions ||--o{ immediate_action_deliveries : "submission_id"
-    user_delegations ||--o{ delegated_actions : "delegation_id"
-    users |o--o{ user_delegations : "cancelled_by_user_id"
-    users ||--o{ delegated_actions : "acting_for_user_id"
-    users ||--o{ delegated_actions : "actor_user_id"
-    users ||--o{ immediate_action_deliveries : "actor_user_id"
-    users ||--o{ user_delegations : "created_by_user_id"
-    users ||--o{ user_delegations : "delegate_user_id"
-    users ||--o{ user_delegations : "delegator_user_id"
 ```

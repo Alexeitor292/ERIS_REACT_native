@@ -14,14 +14,19 @@ WORKDIR /app
 # base system libraries that python:*-slim strips (e.g. libexpat for GDAL's XML
 # drivers). Install just those runtime libs so `import rasterio` works.
 RUN apt-get update \
+    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends libexpat1 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt requirements-worker.txt ./
-RUN pip install --no-cache-dir -r requirements-worker.txt
+COPY requirements.txt requirements-worker.txt constraints.txt ./
+RUN pip install --no-cache-dir --upgrade pip==26.3 \
+    && pip install --no-cache-dir -r requirements-worker.txt
 
 COPY app ./app
 COPY alembic.ini .
 COPY migrations ./migrations
+
+RUN groupadd --gid 10001 eris && useradd --uid 10001 --gid eris --no-create-home eris
+USER 10001:10001
 
 CMD ["python", "-m", "app.worker.offline_scene_worker_esri"]
