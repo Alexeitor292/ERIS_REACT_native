@@ -12,7 +12,7 @@ from .deps import deny_public_only, require_roles
 from .db import get_db
 from .storage import put_object_bytes, make_object_key
 from .config import settings
-from .services import form_access
+from .services import field_media_ingest, form_access
 from .roles import GISA_AUTHOR_ROLES
 
 router = APIRouter(tags=["photos"])
@@ -196,6 +196,12 @@ async def _store_submission_attachment(*, submission_id: int, file: UploadFile, 
     mime_type = file.content_type or "application/octet-stream"
     normalized_section = _normalize_section_key(section_key)
     normalized_kind = _normalize_kind(kind, mime_type)
+    # Parse only the bytes already accepted by the edit guard and upload limit.
+    # Re-reading the stream in a wrapper would bypass both checks and require
+    # a rewind that can fail after consuming an upload.
+    if str(kind or "").upper() == "PHOTO" or mime_type.lower().startswith("image/"):
+        embedded = field_media_ingest.extract_embedded_photo_metadata(content)
+        capture_metadata_json = field_media_ingest.merge_capture_metadata_json(capture_metadata_json, embedded)
     capture_metadata = _normalize_capture_metadata(capture_metadata_json)
     if capture_metadata is not None and normalized_kind != "PHOTO":
         raise HTTPException(status_code=400, detail="Capture metadata is supported only for PHOTO attachments")

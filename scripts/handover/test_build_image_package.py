@@ -207,7 +207,9 @@ class ImagePackageTests(unittest.TestCase):
         output = Path(self.work.name) / "output"
         argv = ["build_image_package.py", "--candidates", self.work.name,
                 "--output", str(output), "--source-commit", COMMIT,
-                "--rehearsal-log", str(Path(self.work.name) / "not-read")]
+                "--rehearsal-log", str(Path(self.work.name) / "not-read"),
+                "--signature-log", str(Path(self.work.name) / "not-read-signature"),
+                "--database-evidence", str(Path(self.work.name) / "not-read-database")]
         with patch("sys.argv", argv), patch.object(package.subprocess, "check_output", side_effect=[COMMIT, "backend/.env\0"]), redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit) as failure:
                 package.main()
@@ -222,9 +224,14 @@ class ImagePackageTests(unittest.TestCase):
             (self.folder / "runtime.env").write_text("DISPOSABLE=must-not-be-packaged")
         output = Path(self.work.name) / "output"
         log = Path(self.work.name) / "rehearsal.log"
-        log.write_text("PASS matched backup restored into fresh volumes: synthetic data\n")
+        log.write_text(package.RECOVERY_MARKER + "\n")
+        signature_log = Path(self.work.name) / "signature.log"
+        signature_log.write_text(package.SIGNATURE_MARKER + "\n")
+        db_id = (Path(self.work.name) / "candidate-mariadb" / "image-id.txt").read_text()
+        database = self.database_evidence(db_id)
         argv = ["build_image_package.py", "--candidates", self.work.name,
-                "--output", str(output), "--source-commit", COMMIT, "--rehearsal-log", str(log)]
+                "--output", str(output), "--source-commit", COMMIT, "--rehearsal-log", str(log),
+                "--signature-log", str(signature_log), "--database-evidence", str(database)]
 
         def export_source(command, **kwargs):
             self.assertEqual(command[:2], ["git", "archive"])
@@ -236,6 +243,9 @@ class ImagePackageTests(unittest.TestCase):
         manifest = json.loads((output / "manifest.json").read_text())
         self.assertEqual([record["name"] for record in manifest["images"]], list(package.NAMES))
         self.assertEqual(manifest["source_commit"], COMMIT)
+        self.assertEqual(manifest["database_integration"]["executed"], 2)
+        self.assertEqual((output / "database-integration" / "candidate-db.xml").read_bytes(), (database / "candidate-db.xml").read_bytes())
+        self.assertEqual((output / "signature-rehearsal.log").read_text(), signature_log.read_text())
         for name in package.NAMES:
             self.assertEqual({path.name for path in (output / "images" / name).iterdir()}, set(package.candidate_files(name)))
         lines = (output / "SHA256SUMS").read_text().splitlines()
@@ -243,6 +253,62 @@ class ImagePackageTests(unittest.TestCase):
         for line in lines:
             expected, relative = line.split("  ", 1)
             self.assertEqual(package.digest(output / relative), expected)
+
+    def test_missing_or_incomplete_signature_evidence_is_refused(self):
+        output = Path(self.work.name) / "output"
+        recovery = Path(self.work.name) / "recovery.log"
+        recovery.write_text(package.RECOVERY_MARKER + "\n")
+        signature = Path(self.work.name) / "signature.log"
+        argv = ["build_image_package.py", "--candidates", self.work.name, "--output", str(output),
+                "--source-commit", COMMIT, "--rehearsal-log", str(recovery), "--signature-log", str(signature),
+                "--database-evidence", str(Path(self.work.name) / "not-read-database")]
+        for content in (None, "FAIL signature enforcement\n", "prefix " + package.SIGNATURE_MARKER + "\n"):
+            with self.subTest(content=content):
+                if content is not None:
+                    signature.write_text(content)
+                with patch("sys.argv", argv), patch.object(package.subprocess, "check_output", side_effect=[COMMIT, "README.md\0"]), redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit) as failure:
+                        package.main()
+                self.assertEqual(failure.exception.code, 2)
+                self.assertFalse(output.exists())
+
+    def test_failed_or_prefixed_recovery_log_is_refused(self):
+        output = Path(self.work.name) / "output"
+        recovery = Path(self.work.name) / "recovery.log"
+        argv = ["build_image_package.py", "--candidates", self.work.name, "--output", str(output),
+                "--source-commit", COMMIT, "--rehearsal-log", str(recovery),
+                "--signature-log", str(Path(self.work.name) / "not-read-signature"),
+                "--database-evidence", str(Path(self.work.name) / "not-read-database")]
+        for content in ("", "FAIL did not reach marker: " + package.RECOVERY_MARKER, "prefix " + package.RECOVERY_MARKER):
+            with self.subTest(content=content):
+                recovery.write_text(content + "\n")
+                with patch("sys.argv", argv), patch.object(package.subprocess, "check_output", side_effect=[COMMIT, "README.md\0"]), redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit) as failure:
+                        package.main()
+                self.assertEqual(failure.exception.code, 2)
+                self.assertFalse(output.exists())
+
+    def database_evidence(self, image_id="sha256:" + "c" * 64):
+        folder = Path(self.work.name) / "database"
+        folder.mkdir(exist_ok=True)
+        (folder / "candidate-db.log").write_text(f"Candidate MariaDB source: {COMMIT}\nCandidate MariaDB image: {image_id}\n{package.DATABASE_MARKER}\n")
+        (folder / "candidate-db.xml").write_text('<testsuites><testsuite tests="2" errors="0" failures="0" skipped="0" /></testsuites>')
+        return folder
+
+    def test_failed_empty_and_all_skipped_db_reports_are_rejected(self):
+        folder = self.database_evidence()
+        for tests, errors, failures, skipped in ((2, 1, 0, 0), (2, 0, 1, 0), (0, 0, 0, 0), (2, 0, 0, 2)):
+            with self.subTest(tests=tests, errors=errors, failures=failures, skipped=skipped):
+                (folder / "candidate-db.xml").write_text(f'<testsuites><testsuite tests="{tests}" errors="{errors}" failures="{failures}" skipped="{skipped}" /></testsuites>')
+                with self.assertRaisesRegex(ValueError, "JUnit report"):
+                    package.inspect_database_evidence(folder, COMMIT, "sha256:" + "c" * 64)
+
+    def test_db_report_requires_matching_source_and_image_markers(self):
+        folder = self.database_evidence()
+        for commit, image in ((OTHER, "sha256:" + "c" * 64), (COMMIT, "sha256:" + "d" * 64)):
+            with self.subTest(commit=commit, image=image):
+                with self.assertRaisesRegex(ValueError, "matching source/image/success"):
+                    package.inspect_database_evidence(folder, commit, image)
 
 
 if __name__ == "__main__":

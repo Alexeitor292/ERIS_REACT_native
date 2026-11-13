@@ -34,6 +34,23 @@ flowchart LR
 Nothing is pushed to Harbor before the gate passes, so a failed scan publishes
 nothing.
 
+The publisher first audits the selected signing tool before mounting signing
+credentials, then scans all five runtime images. Jenkins builds the patched
+Cosign source recipe by default; an approved mirror override receives the same
+all-severity gate. Direct helper use requires an explicit `COSIGN_IMAGE`.
+The upstream tool baseline is retained separately as investigation evidence and
+never receives a signing key. The custom candidate preserves upstream identity,
+actual Go build/module metadata and licenses for future advisory matching.
+
+Cosign 3 uses explicit legacy signature/attestation options for Podman's
+`sigstoreSigned` attachment format. Do not remove those options without proving
+host-policy compatibility. The signer runs with the rootless account's UID/GID,
+read-only credentials/root filesystem and disposable temporary state; private
+mode-600 files are not made readable to other users. For an agency registry CA,
+set `COSIGN_REGISTRY_CA_FILE` and install trust for host Podman as well; do not
+disable TLS verification. The ephemeral TLS-registry CI test proves actual
+signing/attestation and correct/wrong/unsigned-image pull decisions.
+
 The separate [GitHub candidate workflow](../handover/image-package.md) builds,
 scans and rehearses the five-image package without accessing a live host or
 publishing a Harbor release. Agency credentials and acceptance are still needed.

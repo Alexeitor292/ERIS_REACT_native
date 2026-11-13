@@ -98,7 +98,7 @@ alembic upgrade head
 Run the API with auto-reload on port 8000:
 
 ```bash
-./run.sh        # PowerShell: .\run.ps1   (both run: uvicorn app.asgi:app --reload --host 0.0.0.0 --port 8000)
+bash run.sh        # PowerShell: .\run.ps1   (both run: uvicorn app.asgi:app --reload --host 0.0.0.0 --port 8000)
 ```
 
 The backend **refuses to start** if the database is not at the latest migration.

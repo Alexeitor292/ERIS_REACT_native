@@ -19,12 +19,17 @@
 #
 # Environment: TRIVY_IMAGE, COSIGN_IMAGE, TRIVY_SEVERITY, TRIVY_DB_REPOSITORY
 # (Harbor mirror of the vulnerability database), TRIVY_CACHE_DIR, COSIGN_KEY_FILE,
-# COSIGN_PASSWORD, REGISTRY_AUTH_FILE (the podman login --authfile JSON).
+# COSIGN_PASSWORD, REGISTRY_AUTH_FILE (the podman login --authfile JSON),
+# COSIGN_REGISTRY_CA_FILE (optional private registry CA), COSIGN_NETWORK (optional
+# Podman network; the isolated TLS-registry integration test uses host/loopback).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TRIVY_IMAGE="${TRIVY_IMAGE:-docker.io/aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb}"
-COSIGN_IMAGE="${COSIGN_IMAGE:-ghcr.io/sigstore/cosign/cosign:v2.4.1}"
+# No implicit signer: even the latest upstream release can contain vulnerable
+# dependencies. Jenkins builds/audits the repository recipe by default; direct
+# callers must explicitly select their built and scanned tool image.
+COSIGN_IMAGE="${COSIGN_IMAGE:-}"
 TRIVY_SEVERITY="${TRIVY_SEVERITY:-UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL}"
 IGNORE_FILE="$ROOT/.trivyignore"
 
@@ -43,19 +48,40 @@ trivy() {
 
 cosign() {
   local keydir="$1" sbomdir="$2"; shift 2
+  [[ -n "$COSIGN_IMAGE" ]] || die "COSIGN_IMAGE must name a built and scanned signing tool (deploy/images/Dockerfile.cosign)"
   local auth
   auth="$(mktemp -d)"
   # cosign reads registry credentials from $DOCKER_CONFIG/config.json.
   [[ -z "${REGISTRY_AUTH_FILE:-}" ]] || cp "$REGISTRY_AUTH_FILE" "$auth/config.json"
+  [[ ! -f "$auth/config.json" ]] || chmod 600 "$auth/config.json"
+  local network_args=() ca_args=() args=("$@")
+  [[ -z "${COSIGN_NETWORK:-}" ]] || network_args+=(--network "$COSIGN_NETWORK")
+  if [[ -n "${COSIGN_REGISTRY_CA_FILE:-}" ]]; then
+    [[ -f "$COSIGN_REGISTRY_CA_FILE" ]] || { rm -rf -- "$auth"; die "registry CA file is missing"; }
+    local registry_ca
+    registry_ca="$(cd "$(dirname "$COSIGN_REGISTRY_CA_FILE")" && pwd)/$(basename "$COSIGN_REGISTRY_CA_FILE")"
+    ca_args+=(-v "$registry_ca:/registry-ca.crt:ro,Z")
+    case "${args[0]}" in
+      sign|attest|verify|verify-attestation) args+=(--registry-cacert /registry-ca.crt) ;;
+    esac
+  fi
   local status=0
-  podman run --rm -e COSIGN_PASSWORD -e DOCKER_CONFIG=/auth -v "$auth:/auth:ro,Z" -v "$keydir:/keys:ro,Z" \
-    -v "$sbomdir:/sbom:ro,Z" "$COSIGN_IMAGE" "$@" || status=$?
+  # The distroless image's default UID65532 cannot read host-private mode-600
+  # files. Keep the rootless service account's identity instead; do not loosen
+  # the key/auth permissions. State is disposable and credentials stay read-only.
+  podman run --rm --userns=keep-id --user "$(id -u):$(id -g)" \
+    --cap-drop=ALL --security-opt=no-new-privileges --read-only \
+    --workdir /tmp --tmpfs /tmp:rw,noexec,nosuid,size=64m,mode=1777 \
+    "${network_args[@]}" "${ca_args[@]}" -e COSIGN_PASSWORD -e HOME=/tmp -e DOCKER_CONFIG=/auth \
+    -v "$auth:/auth:ro,Z" -v "$keydir:/keys:ro,Z" \
+    -v "$sbomdir:/sbom:ro,Z" "$COSIGN_IMAGE" "${args[@]}" || status=$?
   rm -rf -- "$auth"
   return "$status"
 }
 
 require_digest() {
-  [[ "$1" == *@sha256:* ]] || die "sign and verify digests, never tags: $1"
+  [[ "$1" =~ ^[a-zA-Z0-9][a-zA-Z0-9./:_-]*@sha256:[a-f0-9]{64}$ ]] \
+    || die "sign and verify a complete sha256 digest, never tags or malformed references: $1"
 }
 
 case "${1:-}" in
@@ -88,8 +114,12 @@ case "${1:-}" in
     [[ -f "$key" && -f "$sbom" ]] || die "missing cosign key or SBOM"
     keydir="$(cd "$(dirname "$key")" && pwd)" keyname="$(basename "$key")"
     sbomdir="$(cd "$(dirname "$sbom")" && pwd)" sbomname="$(basename "$sbom")"
-    cosign "$keydir" "$sbomdir" sign --yes --key "/keys/$keyname" --tlog-upload=false "$ref"
+    # Podman's sigstoreSigned policy consumes legacy .sig attachments. Cosign3
+    # supports this explicit compatibility mode; its defaults use newer bundles.
+    cosign "$keydir" "$sbomdir" sign --yes --key "/keys/$keyname" --tlog-upload=false \
+      --new-bundle-format=false --use-signing-config=false --registry-referrers-mode=legacy "$ref"
     cosign "$keydir" "$sbomdir" attest --yes --key "/keys/$keyname" --tlog-upload=false \
+      --new-bundle-format=false --use-signing-config=false --registry-referrers-mode=legacy \
       --type cyclonedx --predicate "/sbom/$sbomname" "$ref"
     echo "release-gate: signed $ref and attached its SBOM"
     ;;
@@ -98,7 +128,8 @@ case "${1:-}" in
     require_digest "$ref"
     [[ -f "$pub" ]] || die "missing public key $pub"
     keydir="$(cd "$(dirname "$pub")" && pwd)"
-    cosign "$keydir" "$keydir" verify --key "/keys/$(basename "$pub")" --insecure-ignore-tlog=true "$ref" >/dev/null
+    cosign "$keydir" "$keydir" verify --key "/keys/$(basename "$pub")" --insecure-ignore-tlog=true \
+      --new-bundle-format=false --registry-referrers-mode=legacy "$ref" >/dev/null
     echo "release-gate: signature verified for $ref"
     ;;
   public-key)

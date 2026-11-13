@@ -355,14 +355,16 @@ def _settings(**overrides):
     return Settings(**values)
 
 
-@pytest.mark.parametrize("environment", ["prod", "production", " PROD ", "PRODUCTION", " Production\t"])
+@pytest.mark.parametrize("environment", [
+    "prod", "production", " PROD ", "PRODUCTION", " Production\t", "stage", "staging", " STAGING ",
+])
 def test_production_accepts_a_strong_key_and_bounded_sessions(environment):
     production = _settings(ENV=environment)
     assert production.ENV == "prod"
     assert production.SESSION_ABSOLUTE_MINUTES == 720
 
 
-@pytest.mark.parametrize("environment", ["prod", "production", " PRODUCTION "])
+@pytest.mark.parametrize("environment", ["prod", "production", " PRODUCTION ", "stage", "staging", " STAGING "])
 @pytest.mark.parametrize("overrides", [
     {"JWT_SECRET": "short"},
     {"JWT_SECRET": "CHANGE_ME_AT_LEAST_32_RANDOM_BYTES"},
@@ -381,8 +383,52 @@ def test_production_refuses_weak_session_settings(environment, overrides):
         _settings(ENV=environment, **overrides)
 
 
-def test_development_keeps_its_placeholder_key():
-    assert _settings(ENV="dev", JWT_SECRET="ci_placeholder_secret", WEB_BASE_URL="http://localhost:5173").ENV == "dev"
+@pytest.mark.parametrize("environment", ["prod", "staging"])
+@pytest.mark.parametrize("credentials", [
+    {"SMTP_USER": "disposable-test-user", "SMTP_PASSWORD": None},
+    {"SMTP_USER": None, "SMTP_PASSWORD": "disposable-test-value"},
+    {"SMTP_USER": "disposable-test-user", "SMTP_PASSWORD": "disposable-test-value"},
+])
+def test_hosted_smtp_credentials_require_tls(environment, credentials):
+    with pytest.raises(ValueError, match="SMTP_STARTTLS or SMTP_SSL"):
+        _settings(ENV=environment, SMTP_HOST="relay.example.test", SMTP_STARTTLS=False,
+                  SMTP_SSL=False, **credentials)
+
+
+@pytest.mark.parametrize("starttls,implicit", [(True, False), (False, True)])
+def test_hosted_smtp_credentials_accept_either_verified_tls_mode(starttls, implicit):
+    assert _settings(SMTP_HOST="relay.example.test", SMTP_USER="disposable-test-user",
+                     SMTP_PASSWORD="disposable-test-value", SMTP_STARTTLS=starttls, SMTP_SSL=implicit)
+
+
+def test_hosted_no_auth_internal_relay_and_disabled_email_remain_configurable():
+    assert _settings(SMTP_HOST="relay.example.test", SMTP_USER=None, SMTP_PASSWORD=None,
+                     SMTP_STARTTLS=False, SMTP_SSL=False)
+    assert _settings(SMTP_HOST=None, SMTP_USER="unused-disposable-test-user",
+                     SMTP_PASSWORD="unused-disposable-test-value", SMTP_STARTTLS=False, SMTP_SSL=False)
+
+
+def test_invalid_settings_traceback_does_not_echo_credential_inputs():
+    with pytest.raises(ValueError) as failure:
+        _settings(DB_PASS="do-not-log-this-db-input", JWT_SECRET="do-not-log-this-signing-input")
+    message = str(failure.value)
+    assert "JWT_SECRET" in message
+    assert "input_value" not in message
+    assert "do-not-log-this" not in message
+
+
+@pytest.mark.parametrize("environment,canonical", [
+    ("dev", "dev"), ("development", "dev"), ("local", "dev"), (" Development ", "dev"),
+    ("test", "test"), ("testing", "test"), (" TESTING\t", "test"),
+])
+def test_local_and_test_aliases_keep_their_development_settings(environment, canonical):
+    assert _settings(ENV=environment, JWT_SECRET="ci_placeholder_secret", WEB_BASE_URL="http://localhost:5173").ENV == canonical
+
+
+@pytest.mark.parametrize("environment", ["", " ", "\t", "prodution", "stagin", "qa", "ci", "unknown"])
+def test_unknown_or_empty_environments_refuse_to_start(environment):
+    with pytest.raises(ValueError, match="ENV must be"):
+        _settings(ENV=environment)
 
 
 # ---------------------------------------------------------------------------

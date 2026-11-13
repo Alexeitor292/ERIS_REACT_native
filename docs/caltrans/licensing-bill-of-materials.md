@@ -229,12 +229,12 @@ Podman development setup is a different product/license choice.
 React and the community application stack do not impose ERIS seat fees.
 Open-source notices and redistribution duties still apply. MariaDB community
 server is GPL; its publisher permits internal and remote-service use without
-a per-user fee. SeaweedFS 4.50 is Apache-2.0. Preserve notices and source-offer
+a per-user fee. SeaweedFS 4.53 is Apache-2.0. Preserve notices and source-offer
 obligations applicable to any delivered binaries/images, including their OS
 packages. Inventory exact release versions/SBOMs rather than treating all
 transitive packages as MIT.
 [MariaDB licensing](https://mariadb.com/kb/en/licensing-faq/),
-[SeaweedFS 4.50 license](https://github.com/seaweedfs/seaweedfs/blob/4.50/LICENSE).
+[SeaweedFS 4.53 license](https://github.com/seaweedfs/seaweedfs/blob/4.53/LICENSE).
 
 The repository has no top-level `LICENSE` granting rights for ERIS's own code.
 Deh Jeng Jang/Caltrans must decide ownership and permitted distribution; do not

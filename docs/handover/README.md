@@ -164,8 +164,8 @@ files; never put a session token in a URL; every new route needs a role guard
 | Quarterly | Access review: ERIS administrators, disabled leavers, Entra app assignments | [Administration](../user-guides/administration.md), [secrets](../security/secrets-and-keys.md) | ERIS admins + IT |
 | 30 days before expiry | Renew the Entra client certificate (`eris-pod.sh cert-check` warns) | [Rotation](../security/secrets-and-keys.md#rotation-procedures) | IT |
 | 30 days before expiry | Renew TLS certificates at the gateway | Caltrans PKI process | IT |
-| **Yearly** | Renew the iOS **in-house provisioning profile**, re-sign and re-upload to Intune. If it lapses, the app stops opening on every phone | [iOS distribution](../development/ios.md) | Developer + IT |
-| Every 3 years | Renew the Apple Enterprise distribution certificate | Apple Developer portal | IT |
+| Before its actual expiry, if Enterprise distribution is selected | Renew the in-house provisioning profile, re-sign and update Intune; expiry can stop installed apps | [iOS distribution](../development/ios.md) | Developer + IT |
+| Before recorded expiry, for the selected distribution path | Renew agency Apple membership, signing certificates and profiles as applicable; record actual dates | Apple Developer portal | IT |
 | Yearly, or on staff change | Rotate the cosign key, APNs key, database and S3 credentials, JWT signing key (ends all sessions) | [Rotation](../security/secrets-and-keys.md#rotation-procedures) | IT |
 
 ## Where to get help without the author

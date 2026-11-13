@@ -106,6 +106,97 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
           compression-level: 0
+  signer-baseline:
+    name: Upstream signer baseline evidence (never used for signing)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Preserve full upstream baseline findings
+        run: |
+          upstream=ghcr.io/sigstore/cosign/cosign:v3.1.4@sha256:0f06154836d2de34f887a5c273506d52ca43edaa1d9e53e6510fa78a48f69c2d
+          podman pull "$upstream"
+          result=0
+          bash deploy/ci/release-gate.sh scan "$upstream" cosign-upstream "$RUNNER_TEMP/signer-baseline" || result=$?
+          echo "Upstream baseline scan exit=$result; this image never receives signing credentials."
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: signer-upstream-baseline
+          path: ${{ runner.temp }}/signer-baseline/*.json
+          if-no-files-found: ignore
+          retention-days: 30
+  signatures:
+    name: Real TLS registry signatures and Podman rejection policy
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    env:
+      COSIGN_IMAGE: localhost/eris/cosign-tool:candidate
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Install registry fixture password utility
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y apache2-utils
+      - name: Build patched signing tool from verified upstream source
+        run: >-
+          podman build --pull=always --no-cache
+          --label org.opencontainers.image.revision=${{ github.event.pull_request.head.sha || github.sha }}
+          -f deploy/images/Dockerfile.cosign -t "$COSIGN_IMAGE" .
+      - name: Scan signer, sign and attest with private credentials, enforce pull policy
+        env:
+          ERIS_SIGNATURE_REPORT_DIR: ${{ runner.temp }}/signing-tool-audit
+        run: |
+          set -o pipefail
+          bash deploy/ci/tests/test-signature-chain.sh 2>&1 | tee "$RUNNER_TEMP/signature-chain.log"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: signature-chain
+          path: |
+            ${{ runner.temp }}/signature-chain.log
+            ${{ runner.temp }}/signing-tool-audit/*.json
+          if-no-files-found: ignore
+          retention-days: 30
+  candidate-db:
+    name: Exact MariaDB candidate full DB integration suite
+    needs: images
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: candidate-mariadb
+          path: ${{ runner.temp }}/candidate-db
+      - name: Load the exact built and scanned MariaDB candidate
+        run: |
+          test "$(cat "$RUNNER_TEMP/candidate-db/source-commit.txt")" = "$(git rev-parse HEAD)"
+          gzip -dc "$RUNNER_TEMP/candidate-db/mariadb.tar.gz" | docker load
+      - name: Authoritative schema, baseline upgrade and full DB test suite
+        env:
+          ERIS_TEST_DB_IMAGE: localhost/eris/mariadb:candidate
+          ERIS_TEST_EVIDENCE_DIR: ${{ runner.temp }}/candidate-db-results
+        run: |
+          set -o pipefail
+          mkdir -p "$ERIS_TEST_EVIDENCE_DIR"
+          bash deploy/ci/tests/test-candidate-database.sh 2>&1 | tee "$ERIS_TEST_EVIDENCE_DIR/candidate-db.log"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: candidate-db-results
+          path: ${{ runner.temp }}/candidate-db-results/
+          if-no-files-found: ignore
+          retention-days: 30
   podman:
     name: Release regressions and real rootless secrets
     runs-on: ubuntu-26.04
@@ -163,7 +254,7 @@ jobs:
           retention-days: 30
   handoff:
     name: Checksummed five-image handoff candidate
-    needs: [images, podman, rehearsal]
+    needs: [images, podman, rehearsal, signatures, candidate-db]
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
@@ -178,6 +269,14 @@ jobs:
         with:
           name: rootless-rehearsal
           path: ${{ runner.temp }}/recovery
+      - uses: actions/download-artifact@v4
+        with:
+          name: signature-chain
+          path: ${{ runner.temp }}/signatures
+      - uses: actions/download-artifact@v4
+        with:
+          name: candidate-db-results
+          path: ${{ runner.temp }}/database-integration
       - name: Test package integrity checks
         run: python3 -m unittest discover -s scripts/handover -p 'test_*.py' -v
       - name: Bind clean scans, image archives, source and recovery evidence
@@ -186,6 +285,8 @@ jobs:
           --candidates "$RUNNER_TEMP/candidates"
           --source-commit "$(git rev-parse HEAD)"
           --rehearsal-log "$RUNNER_TEMP/recovery/rehearsal.log"
+          --signature-log "$RUNNER_TEMP/signatures/signature-chain.log"
+          --database-evidence "$RUNNER_TEMP/database-integration"
           --output "$RUNNER_TEMP/ERIS-image-handoff"
       - uses: actions/upload-artifact@v4
         with:

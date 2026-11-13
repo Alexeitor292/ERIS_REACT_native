@@ -12,7 +12,8 @@ pipeline {
     string(name: 'MARIADB_SOURCE', defaultValue: '', description: 'Optional approved MariaDB mirror; blank builds the patched repository recipe')
     string(name: 'SEAWEEDFS_SOURCE', defaultValue: '', description: 'Optional approved SeaweedFS mirror; blank builds the patched repository recipe')
     string(name: 'TRIVY_IMAGE', defaultValue: 'docker.io/aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb', description: 'Scanner image; mirror into Harbor and pin by digest')
-    string(name: 'COSIGN_IMAGE', defaultValue: 'ghcr.io/sigstore/cosign/cosign:v2.4.1', description: 'Signing image; mirror into Harbor and pin by digest')
+    string(name: 'COSIGN_IMAGE', defaultValue: '', description: 'Blank builds the patched repository signing tool; optional approved mirror is audited before use')
+    string(name: 'COSIGN_REGISTRY_CA_FILE', defaultValue: '', description: 'Optional PEM registry CA file on the Jenkins agent, mounted read-only in the signer; host Podman also needs agency CA trust')
     string(name: 'TRIVY_DB_REPOSITORY', defaultValue: '', description: 'Harbor mirror of the Trivy vulnerability database (blank: Trivy default)')
     string(name: 'TRIVY_SEVERITY', defaultValue: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL', description: 'Severities that fail the gate, including findings without a fix; changes require security approval')
     choice(name: 'DEPLOY_TO', choices: ['none', 'staging', 'staging-then-production'], description: 'After publishing: release to staging, then (after approval) the same digests to production')
@@ -48,6 +49,8 @@ pipeline {
           if (!(env.ERIS_TAG ==~ /[A-Za-z0-9_.-]+/)) error('Invalid release tag')
           env.ERIS_REPO = "${params.HARBOR_HOST}/${params.HARBOR_PROJECT}"
           env.ERIS_SOURCE_REVISION = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+          env.BUILD_COSIGN_FROM_SOURCE = params.COSIGN_IMAGE.trim() ? 'false' : 'true'
+          env.COSIGN_IMAGE = params.COSIGN_IMAGE.trim() ?: "${env.ERIS_REPO}/cosign-tool:${env.ERIS_TAG}"
         }
         // The website's browser-safe ArcGIS key, restricted to its address (docs/operations/map-licensing.md).
         withCredentials([string(credentialsId: 'eris-arcgis-web-key', variable: 'VITE_ARCGIS_API_KEY')]) {
@@ -55,11 +58,14 @@ pipeline {
             set -eu
             test -n "$VITE_ARCGIS_API_KEY" || { echo 'Set the agency-owned, origin-restricted web ArcGIS key'; exit 2; }
             labels="--label org.opencontainers.image.revision=$ERIS_SOURCE_REVISION --label org.opencontainers.image.version=$ERIS_TAG"
+            if [ "$BUILD_COSIGN_FROM_SOURCE" = true ]; then
+              podman build --pull=always --no-cache $labels -f deploy/images/Dockerfile.cosign -t "$COSIGN_IMAGE" .
+            fi
             podman build --pull=always --no-cache $labels -t "$ERIS_REPO/api:$ERIS_TAG" backend
             podman build --pull=always --no-cache $labels -f backend/Dockerfile.worker -t "$ERIS_REPO/worker:$ERIS_TAG" backend
             bash deploy/podman/build-web.sh "$ERIS_REPO/web:$ERIS_TAG" \
               "$ENTRA_ENABLED" "$LOCAL_LOGIN_ENABLED"
-            podman run --rm --entrypoint python "$ERIS_REPO/api:$ERIS_TAG" -m compileall -q app
+            podman run --rm --entrypoint python "$ERIS_REPO/api:$ERIS_TAG" -X pycache_prefix=/tmp/eris-pycache -m compileall -q app
             if [ -z "$MARIADB_SOURCE" ]; then
               podman build --pull=always --no-cache $labels -f deploy/images/Dockerfile.mariadb -t "$ERIS_REPO/mariadb:$ERIS_TAG" .
             fi
@@ -99,6 +105,10 @@ pipeline {
             trap 'podman logout --authfile "$REGISTRY_AUTH_FILE" "$HARBOR_HOST" >/dev/null 2>&1 || true; rm -rf -- "$auth_dir"' EXIT
             printf '%s' "$HARBOR_PASS" | podman login --authfile "$REGISTRY_AUTH_FILE" "$HARBOR_HOST" \
               --username "$HARBOR_USER" --password-stdin
+            # Audit the configured signer before it receives a signing key.
+            if [ "$BUILD_COSIGN_FROM_SOURCE" != true ]; then
+              podman pull --authfile "$REGISTRY_AUTH_FILE" "$COSIGN_IMAGE"
+            fi
             # Optional agency mirrors receive local destination tags before scanning.
             # They are never trusted solely because they already exist in Harbor.
             for name in mariadb seaweedfs; do

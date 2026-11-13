@@ -4,7 +4,9 @@ The GitHub Actions **Deployment images** workflow builds all five runtime
 images from one source commit on Linux/amd64. Its `ERIS-image-handoff` artifact
 is created only after all five all-severity vulnerability/secret scans, release
 regressions, real rootless secret tests, and five-image installation/recovery
-rehearsal pass. A failed candidate scan still retains its individual reports
+rehearsal pass. It additionally requires the full database integration suite
+against the exact MariaDB image and an isolated real TLS-registry signing and
+signature-policy test. A failed candidate scan still retains its individual reports
 for investigation; it does not produce an accepted combined package.
 
 ## Contents and verification
@@ -25,6 +27,10 @@ The package contains:
   API-only private secret, signed object round-trip, anonymous bucket refusal,
   and matched cold backup restored into fresh volumes with the administrator
   and object intact. This uses disposable credentials and synthetic data.
+- `signature-rehearsal.log`: private TLS-registry signature/attestation and
+  wrong-key/unsigned-image rejection, using ephemeral test keys.
+- `candidate-db.log` and `candidate-db.xml`: full DB integration results bound
+  to this source commit and exact MariaDB image identity.
 
 After extracting the artifact on Linux:
 
@@ -40,6 +46,11 @@ SBOMs, and mismatched image/archive identities. Local image IDs identify the
 candidate contents; they are not substitutes for registry manifest digests or
 Caltrans cosign signatures. Archive the artifact's GitHub run/commit and hashes
 in the [acceptance record](acceptance.md).
+
+The signing rehearsal exercises the real release wrapper and Podman policy,
+not a fake signer. It does not sign these candidate archives with an agency
+key or prove the agency's Harbor/identity configuration. Final release signing
+and acceptance still happen on agency infrastructure.
 
 ## Repeat the isolated installation
 

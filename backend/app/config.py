@@ -16,6 +16,9 @@ class Settings(BaseSettings):
         env_file=str(BASE_DIR / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
+        # Startup validation tracebacks must not echo the input dict containing
+        # database, SMTP, S3 and signing credentials into service/CI logs.
+        hide_input_in_errors=True,
     )
 
     # Runtime
@@ -434,10 +437,19 @@ class Settings(BaseSettings):
     @classmethod
     def _normalize_environment(cls, value: str) -> str:
         # Other modules compare the canonical value when choosing secure cookies,
-        # seed safeguards and production posture. Never let the documented
-        # "production" alias bypass the same checks as "prod".
+        # seed safeguards and production posture. Hosted staging uses the same
+        # controls as production; a typo must fail startup instead of opting out.
         normalized = value.strip().lower()
-        return "prod" if normalized in {"prod", "production"} else normalized
+        aliases = {
+            "dev": "dev", "development": "dev", "local": "dev",
+            "test": "test", "testing": "test",
+            "prod": "prod", "production": "prod", "stage": "prod", "staging": "prod",
+        }
+        if normalized not in aliases:
+            raise ValueError(
+                "ENV must be dev/development/local, test/testing, or prod/production/stage/staging"
+            )
+        return aliases[normalized]
 
     @model_validator(mode="after")
     def _validate_smtp_tls(self):
@@ -469,6 +481,9 @@ class Settings(BaseSettings):
             raise ValueError("ENV=prod requires SESSION_IDLE_MINUTES between 5 and SESSION_ABSOLUTE_MINUTES")
         if not self.WEB_BASE_URL.lower().startswith("https://"):
             raise ValueError("ENV=prod requires an https:// WEB_BASE_URL (session cookies are Secure)")
+        if ((self.SMTP_HOST or "").strip() and (self.SMTP_USER or self.SMTP_PASSWORD)
+                and not (self.SMTP_STARTTLS or self.SMTP_SSL)):
+            raise ValueError("ENV=prod requires SMTP_STARTTLS or SMTP_SSL when SMTP credentials are configured")
         if self.APNS_ENABLED and not (self.APNS_KEY_FILE and self.APNS_KEY_ID and self.APNS_TEAM_ID and self.APNS_TOPIC):
             raise ValueError("APNS_ENABLED requires APNS_KEY_FILE, APNS_KEY_ID, APNS_TEAM_ID and APNS_TOPIC")
         if self.ENTRA_ENABLED:

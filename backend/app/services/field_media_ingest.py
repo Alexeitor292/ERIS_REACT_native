@@ -195,51 +195,6 @@ def merge_capture_metadata_json(raw_json: str | None, embedded: dict | None) -> 
     return json.dumps(merged, separators=(",", ":"))
 
 
-def install_upload_metadata_fallback() -> None:
-    from .. import photos
-
-    if getattr(photos, "_field_media_ingest_installed", False):
-        return
-
-    original = photos._store_submission_attachment
-
-    async def wrapped_store_submission_attachment(
-        *,
-        submission_id,
-        file,
-        section_key,
-        kind,
-        capture_metadata_json,
-        db,
-        user,
-    ):
-        merged_json = capture_metadata_json
-        mime = str(getattr(file, "content_type", "") or "").lower()
-        if str(kind or "").upper() == "PHOTO" or mime.startswith("image/"):
-            try:
-                content = await file.read()
-                await file.seek(0)
-                embedded = extract_embedded_photo_metadata(content)
-                merged_json = merge_capture_metadata_json(capture_metadata_json, embedded)
-            except Exception:
-                try:
-                    await file.seek(0)
-                except Exception:
-                    pass
-        return await original(
-            submission_id=submission_id,
-            file=file,
-            section_key=section_key,
-            kind=kind,
-            capture_metadata_json=merged_json,
-            db=db,
-            user=user,
-        )
-
-    photos._store_submission_attachment = wrapped_store_submission_attachment
-    photos._field_media_ingest_installed = True
-
-
 def _existing_metadata_json(value):
     if isinstance(value, dict):
         return value

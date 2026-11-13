@@ -1,0 +1,26 @@
+{
+  "$schema": "https://cyclonedx.org/schema/bom-1.6.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "version": 1,
+  "components": [
+    {
+      "type": "application",
+      "name": "github.com/sigstore/cosign/v3",
+      "version": "v3.1.4",
+      "purl": "pkg:golang/github.com/sigstore/cosign/v3@v3.1.4",
+      "licenses": [{"license": {"id": "Apache-2.0"}}],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/sigstore/cosign/tree/0e48502cf5ef34e2e60bbd3617aa19945712f705"
+        }
+      ],
+      "properties": [
+        {"name": "eris:binary-version", "value": "v3.1.4-eris.1"},
+        {"name": "eris:upstream-commit", "value": "0e48502cf5ef34e2e60bbd3617aa19945712f705"},
+        {"name": "eris:patches", "value": "Go1.27.4; pinned patched dependencies; unused unsafe ambient ACR credential helper removed"}
+      ]
+    }
+  ]
+}

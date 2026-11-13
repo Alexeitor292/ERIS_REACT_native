@@ -75,3 +75,21 @@ jobs:
             python-audit.json
             npm-audit.json
           retention-days: 14
+
+  swift-dependencies:
+    name: Native Swift dependency advisories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan the current Swift lockfiles for known advisories
+        run: >-
+          docker run --rm -v "$PWD/ios:/source:ro" -v "$RUNNER_TEMP:/report"
+          aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb
+          fs --scanners vuln --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          --exit-code 1 --format json --output /report/swift-audit.json /source
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: swift-dependency-audit
+          path: ${{ runner.temp }}/swift-audit.json
+          retention-days: 30

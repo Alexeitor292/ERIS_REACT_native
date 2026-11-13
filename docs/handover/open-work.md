@@ -33,6 +33,10 @@ All rows are open unless linked evidence below says otherwise.
 | H18 | P1 | Close the security review and scan the five exact production images; complete static-finding triage and environment testing | Developer + Caltrans security | [Security review](../security/review-2026-11-13.md) gates and exceptions accepted; no unsupported zero-risk claim |
 | H19 | P1 | Confirm 300-installation Lite entitlement and optional basemap/Publisher rights; verify Apple membership and distribution path | Owner + GIS/procurement + Apple/Intune team | [Licensing bill of materials](../caltrans/licensing-bill-of-materials.md) questions answered in writing |
 
+Source/package validation is recorded in the [image package](image-package.md),
+including clean candidate scans and synthetic recovery/signature/database tests.
+These automated checks do not close agency hosting, identity, device or acceptance rows.
+
 ## Current implementation facts
 
 - Native Swift is the supported mobile project in `ios/`; React Native/Expo was
@@ -47,9 +51,9 @@ All rows are open unless linked evidence below says otherwise.
 - `ios/project.yml` currently contains Campos Labs Debug/Staging team, bundle
   ID and server URL, and a placeholder production server. Change and regenerate
   the Xcode project before agency distribution.
-- A GitHub connector search on 2026-11-13 returned no open issues or pull
-  requests for this repository. That result is not a substitute for this
-  register; recheck under the agency account at transfer and record access limits.
+- Handoff/security changes are under review in [pull request 163](https://github.com/Alexeitor292/ERIS_REACT_native/pull/163).
+  Recheck issues, pull requests and required checks under the agency account at
+  transfer; this register also tracks work outside GitHub.
 
 ## Suggested sequence through November
 

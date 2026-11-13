@@ -147,7 +147,7 @@ case "${1:-}" in
       if podman exec eris-mariadb healthcheck.sh --connect --innodb_initialized >/dev/null 2>&1; then ready=1; break; fi
       sleep 2
     done
-    [[ "$ready" == 1 ]] || { podman logs eris-mariadb; exit 1; }
+    [[ "$ready" == 1 ]] || { echo 'MariaDB did not become healthy' >&2; podman logs --tail 80 eris-mariadb >&2; exit 1; }
     # The entrypoint healthcheck can pass while init SQL is still finishing.
     seeded=0
     for _ in $(seq 1 60); do

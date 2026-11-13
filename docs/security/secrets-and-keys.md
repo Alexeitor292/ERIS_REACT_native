@@ -148,7 +148,11 @@ delete the old certificate from the app registration. Put a calendar reminder
 ### cosign signing key
 
 ```bash
-podman run --rm -it -v "$PWD:/keys:Z" ghcr.io/sigstore/cosign/cosign:v2.4.1 generate-key-pair --output-key-prefix /keys/eris-cosign
+# Work in a private directory outside Git; use the reviewed signing-tool image.
+: "${COSIGN_IMAGE:?Set the agency-approved scanned tool image}"
+podman run --rm -it --userns=keep-id --user "$(id -u):$(id -g)" \
+  --cap-drop=ALL --security-opt=no-new-privileges \
+  -v "$PWD:/keys:Z" "$COSIGN_IMAGE" generate-key-pair --output-key-prefix /keys/eris-cosign
 ```
 
 1. Store `eris-cosign.key` and its password as the Jenkins credentials

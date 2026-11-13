@@ -25,6 +25,11 @@ Use separate environment files, keys, DBs, object volumes and backup destination
 for staging and production. With the default pod name and ports, use separate
 hosts; do not launch both default deployments under one service account.
 
+`prod`/`production` and `stage`/`staging` all receive production protections;
+`dev`/`development`/`local` select development, and `test`/`testing` select test.
+Unknown or blank values refuse startup. Use `ENV=prod` for both agency hosted
+environments as shown above; stage names do not weaken session/HTTPS/key checks.
+
 ## Local development: exact values that must agree
 
 Create `deploy/compose/.env`, `backend/.env`, and `web/.env` from their adjacent
@@ -96,9 +101,15 @@ needed values using the [complete configuration reference](../operations/configu
 | Native maps | `ARCGIS_RUNTIME_ENABLED`, separate `ARCGIS_API_KEY`, valid Swift SDK 200.x `ARCGIS_LICENSE_KEY` | Test maps and offline use on a Caltrans device; 100.x/200.x Runtime strings are compatible, while 300.x strings are separate ([Esri](https://developers.arcgis.com/swift/license-and-deployment/use-a-license-in-your-app/)) |
 | iOS Entra | `ENTRA_MOBILE_CLIENT_ID`, `ENTRA_API_SCOPE` matching exposed `access_as_user` scope; MSAL redirect/bundle registration | [iOS specification](../development/ios.md); actual device and Conditional Access test |
 | Push | `APNS_ENABLED=true`, `.p8` key file, key/team IDs, `APNS_TOPIC` matching bundle ID | Xcode debug uses sandbox tokens; enterprise uses production tokens |
-| Email | SMTP relay/port/from/TLS and credentials if required | Approval email delivered; scheduled outbox retry configured |
+| Email | SMTP relay/port/from/TLS and credentials if required; certificate trusted by API and matching `SMTP_HOST` | Verified STARTTLS/implicit TLS; production refuses plaintext authentication; delivery/retry tested |
 | Terrain | Worker running; private bucket verified; approved road/elevation/imagery sources and egress | Generate, download, verify and open a package offline |
 | Guided demo | Build and host `deploy/demo` separately, then `VITE_GUIDED_DEMO_ENABLED=true` | [Guided demo guide](../user-guides/guided-demo.md); production API/data never used |
+
+For a relay using agency PKI, use an approved image trust store or set
+`SSL_CERT_FILE` to a reviewed CA bundle mapped through the API's native-secret
+mechanism. The bundle must retain needed public roots as well as agency roots;
+this setting can also affect other outbound Python HTTPS calls. Keep hostname
+verification enabled and test the actual relay before enabling email.
 
 `VITE_*` values are public build inputs. Rebuild the web image to change them;
 changing runtime env alone cannot change an existing browser bundle. Promote

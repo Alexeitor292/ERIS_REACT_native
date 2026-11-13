@@ -6,12 +6,16 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 repo="${1:?Usage: publish-release.sh REGISTRY/PROJECT TAG OUTDIR}"
 tag="${2:?release tag}" out="${3:?output directory}"
+signer="${COSIGN_IMAGE:?Set COSIGN_IMAGE to the built or approved signing tool image}"
 [[ "$repo" =~ ^[a-zA-Z0-9][a-zA-Z0-9./:_-]+$ && "$repo" != *@* ]] || { echo 'Invalid image repository' >&2; exit 2; }
 [[ "$tag" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$ ]] || { echo 'Invalid image tag' >&2; exit 2; }
 [[ ! -e "$out" ]] || { echo "Release output already exists; choose a fresh directory" >&2; exit 2; }
 mkdir -p "$out/sbom"
 gate="$ROOT/deploy/ci/release-gate.sh"
 names=(api worker web mariadb seaweedfs)
+# The standalone publisher enforces this too: the signing image receives no key
+# or registry-auth mount until its full vulnerability/secret audit succeeds.
+bash "$gate" scan "$signer" cosign "$out/signing-tool-audit"
 # No push or signing is permitted until ALL five scans have succeeded.
 for name in "${names[@]}"; do
   bash "$gate" scan "$repo/$name:$tag" "$name" "$out/sbom"

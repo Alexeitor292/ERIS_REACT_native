@@ -22,7 +22,8 @@ declare -A mounts=()
 env_seen=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --rm) shift ;;
+    --rm|--userns=*|--cap-drop=*|--security-opt=*|--read-only) shift ;;
+    --user|--workdir|--tmpfs|--network) shift 2 ;;
     -e) env_seen+=" $2"; shift 2 ;;
     -v) spec="${2%%:ro,Z}"; spec="${spec%%:Z}"; mounts["${spec#*:}"]="${spec%%:*}"; shift 2 ;;
     *) break ;;
@@ -48,7 +49,7 @@ case "$image" in
 esac
 STUB
 chmod +x "$work/bin/podman"
-export PATH="$work/bin:$PATH" STUB_LOG="$work/calls"
+export PATH="$work/bin:$PATH" STUB_LOG="$work/calls" COSIGN_IMAGE=localhost/eris/cosign-tool:tested
 
 ok() { echo "ok - $*"; passed=$((passed + 1)); }
 check() {
@@ -74,12 +75,27 @@ check "names cannot escape the output directory" -- bash -c '! "$0" scan img ../
 echo "key" > "$work/keys/cosign.key"
 export COSIGN_KEY_FILE="$work/keys/cosign.key" COSIGN_PASSWORD="not-logged"
 check "signing a tag is refused" -- bash -c '! "$0" sign harbor.test/eris/api:1 "$1" > /dev/null 2>&1' "$SCRIPT" "$work/out/api.cdx.json"
+printf 'synthetic public key\n' > "$work/keys/rejection-test.pub"
+COSIGN_IMAGE= check "there is no implicit unscanned signer" -- bash -c '! "$0" sign harbor.test/eris/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "$1" > /dev/null 2>&1' "$SCRIPT" "$work/out/api.cdx.json"
+for invalid in 'harbor.test/eris/api@sha256:abc' 'harbor.test/eris/api@sha256:' \
+  "harbor.test/eris/api@sha256:$(printf '%064d' 0)x" "harbor.test/eris/api@sha256:$(printf 'G%.0s' {1..64})"; do
+  check "malformed digest signing is refused" -- bash -c '! "$0" sign "$1" "$2" > /dev/null 2>&1' "$SCRIPT" "$invalid" "$work/out/api.cdx.json"
+  check "malformed digest verification is refused" -- bash -c '! "$0" verify "$1" "$2" > /dev/null 2>&1' "$SCRIPT" "$invalid" "$work/keys/rejection-test.pub"
+done
 : > "$STUB_LOG"
-check "a digest is signed and its SBOM attested" -- run sign harbor.test/eris/api@sha256:abc "$work/out/api.cdx.json"
-check "the signature uses the Caltrans key" -- grep -q "sign --yes --key /keys/cosign.key --tlog-upload=false harbor.test/eris/api@sha256:abc" "$STUB_LOG"
-check "the SBOM is attached as a CycloneDX attestation" -- grep -q "attest --yes --key /keys/cosign.key --tlog-upload=false --type cyclonedx --predicate /sbom/api.cdx.json" "$STUB_LOG"
+check "a digest is signed and its SBOM attested" -- run sign harbor.test/eris/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "$work/out/api.cdx.json"
+check "the signature uses the Caltrans key and Podman-compatible format" -- grep -q "sign --yes --key /keys/cosign.key --tlog-upload=false --new-bundle-format=false --use-signing-config=false --registry-referrers-mode=legacy harbor.test/eris/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$STUB_LOG"
+check "the SBOM is attached as a legacy CycloneDX attestation" -- grep -q "attest --yes --key /keys/cosign.key --tlog-upload=false --new-bundle-format=false --use-signing-config=false --registry-referrers-mode=legacy --type cyclonedx --predicate /sbom/api.cdx.json" "$STUB_LOG"
+check "private credentials are readable through the rootless identity mapping" -- grep -q -- "--userns=keep-id --user $(id -u):$(id -g)" "$STUB_LOG"
+check "the signer has no capabilities and cannot gain new privileges" -- grep -q -- '--cap-drop=ALL --security-opt=no-new-privileges --read-only' "$STUB_LOG"
 check "the key password is passed by name, never by value" -- bash -c '! grep -q "not-logged" "$0"' "$STUB_LOG"
 check "the public key can be exported for hosts" -- run public-key "$work/keys/cosign.pub"
-check "signatures can be verified with the public key" -- run verify harbor.test/eris/api@sha256:abc "$work/keys/cosign.pub"
+check "signatures can be verified with the public key" -- run verify harbor.test/eris/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "$work/keys/cosign.pub"
+printf 'synthetic registry CA\n' > "$work/keys/registry-ca.crt"
+COSIGN_NETWORK=host COSIGN_REGISTRY_CA_FILE="$work/keys/registry-ca.crt" \
+  check "private registry CA and explicit fixture network can be supplied" -- run verify harbor.test/eris/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "$work/keys/cosign.pub"
+check "registry TLS validation uses the configured CA" -- grep -q -- '--registry-cacert /registry-ca.crt' "$STUB_LOG"
+check "fixture networking is explicit" -- grep -q -- '--network host' "$STUB_LOG"
+check "TLS validation is never disabled" -- bash -c '! grep -qE -- "--allow-(http|insecure)-registry" "$0"' "$STUB_LOG"
 
 echo "All $passed release-gate.sh checks passed."

@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import tarfile
+import xml.etree.ElementTree as ET
 
 try:
     from .build_package import restricted
@@ -19,6 +20,9 @@ except ImportError:  # Direct script execution.
 ROOT = Path(__file__).resolve().parents[2]
 NAMES = ("api", "worker", "web", "mariadb", "seaweedfs")
 SHA256 = re.compile(r"sha256:[a-f0-9]{64}")
+SIGNATURE_MARKER = "PASS ephemeral TLS registry: signatures, SBOM attestation and Podman rejection controls verified"
+DATABASE_MARKER = "PASS candidate MariaDB: baseline upgrade and DB integration suite verified"
+RECOVERY_MARKER = "PASS matched backup restored into fresh volumes: administrator, object, API-only secret and healthy pod persist"
 
 
 def digest(path: Path) -> str:
@@ -165,12 +169,42 @@ def candidate_files(name: str) -> tuple[str, ...]:
     return (f"{name}.tar.gz", "source-commit.txt", "image-id.txt", "scan.json", "sbom.cdx.json")
 
 
+def inspect_database_evidence(folder: Path, commit: str, identity: str) -> dict:
+    for name in ("candidate-db.log", "candidate-db.xml"):
+        path = folder / name
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("Database integration evidence must be regular files")
+    lines = (folder / "candidate-db.log").read_text().splitlines()
+    if not all(value in lines for value in (DATABASE_MARKER, f"Candidate MariaDB source: {commit}",
+                                             f"Candidate MariaDB image: {identity}")):
+        raise ValueError("Database integration evidence lacks matching source/image/success markers")
+    root = ET.parse(folder / "candidate-db.xml").getroot()
+    suites = [root] if root.tag == "testsuite" else root.findall("testsuite") if root.tag == "testsuites" else []
+    if not suites:
+        raise ValueError("Database integration JUnit report has no test suites")
+    tests = skipped = 0
+    for suite in suites:
+        count, errors, failures = (int(suite.attrib[name]) for name in ("tests", "errors", "failures"))
+        skip = int(suite.get("skipped", "0"))
+        if errors != 0 or failures != 0 or not 0 <= skip <= count:
+            raise ValueError("Database integration JUnit report has failures/errors or invalid counts")
+        tests += count
+        skipped += skip
+    if tests - skipped <= 0:
+        raise ValueError("Database integration JUnit report has no executed tests")
+    return {"image_id": identity, "tests": tests, "skipped": skipped, "executed": tests - skipped}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidates", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True, help="New directory outside the repository")
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--rehearsal-log", type=Path, required=True)
+    parser.add_argument("--signature-log", type=Path, required=True,
+                        help="Successful isolated TLS registry signature-enforcement evidence")
+    parser.add_argument("--database-evidence", type=Path, required=True,
+                        help="Exact MariaDB candidate's successful log and JUnit directory")
     args = parser.parse_args()
     commit = args.source_commit
     if not re.fullmatch(r"[a-f0-9]{40}", commit):
@@ -186,9 +220,17 @@ def main() -> None:
     if blocked:
         parser.error("Restricted tracked paths: " + ", ".join(blocked))
     log = args.rehearsal_log.read_text()
-    if "PASS matched backup restored into fresh volumes:" not in log:
+    if RECOVERY_MARKER not in log.splitlines():
         parser.error("Successful five-image recovery evidence is required")
+    try:
+        signature_log = args.signature_log.read_text()
+    except OSError:
+        parser.error("Signature-enforcement evidence could not be read")
+    if SIGNATURE_MARKER not in signature_log.splitlines():
+        parser.error("Successful isolated signature-enforcement evidence is required")
     records = [inspect_candidate(args.candidates / f"candidate-{name}", name, commit) for name in NAMES]
+    database = inspect_database_evidence(args.database_evidence, commit,
+                                         next(record["image_id"] for record in records if record["name"] == "mariadb"))
     out.mkdir(parents=True)
     for name in NAMES:
         destination = out / "images" / name
@@ -198,11 +240,16 @@ def main() -> None:
         for file in candidate_files(name):
             shutil.copyfile(args.candidates / f"candidate-{name}" / file, destination / file)
     shutil.copyfile(args.rehearsal_log, out / "rootless-rehearsal.log")
+    shutil.copyfile(args.signature_log, out / "signature-rehearsal.log")
+    (out / "database-integration").mkdir()
+    for file in ("candidate-db.log", "candidate-db.xml"):
+        shutil.copyfile(args.database_evidence / file, out / "database-integration" / file)
     source = out / f"ERIS-source-{commit[:12]}.zip"
     subprocess.run(["git", "archive", "--format=zip", "--prefix=ERIS/", f"--output={source}", commit], cwd=ROOT, check=True)
     manifest = {"format": "eris-image-handoff-candidate-v1", "source_commit": commit,
                 "created_utc": datetime.now(timezone.utc).isoformat(), "images": records,
-                "scope": "linux/amd64 image candidates and source; synthetic rootless recovery verified; agency configuration, signatures, identity/device acceptance and production approval remain required"}
+                "database_integration": database,
+                "scope": "linux/amd64 image candidates and source; synthetic rootless recovery and isolated signature enforcement verified; agency configuration, signatures, identity/device acceptance and production approval remain required"}
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     (out / "START-HERE.txt").write_text(
         "ERIS image handoff candidate\nOwner: Deh Jeng Jang\n\n"
@@ -210,6 +257,8 @@ def main() -> None:
         "Verify every entry with: sha256sum -c SHA256SUMS\n"
         "Extract ERIS-source-*.zip and read ERIS/docs/handover/image-package.md.\n"
         "Each images/<name>/ directory has its archive, exact image identity, scan and SBOM.\n"
+        "Recovery and isolated signing evidence are in rootless-rehearsal.log and signature-rehearsal.log.\n"
+        "Exact MariaDB image DB integration results are in database-integration/.\n"
         "On an isolated Linux test account, load each image with:\n"
         "  gzip -dc images/<name>/<name>.tar.gz | podman load\n"
         "Use the documented five-image rehearsal; runtime env files/keys/data are not included.\n\n"

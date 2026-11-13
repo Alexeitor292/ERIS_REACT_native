@@ -2,4 +2,6 @@
 *.sh text eol=lf
 *.bash text eol=lf
 *.service text eol=lf
+# Unified patch context contains required leading spaces followed by Go tabs.
+*.patch text eol=lf -whitespace
 *.pdf binary
