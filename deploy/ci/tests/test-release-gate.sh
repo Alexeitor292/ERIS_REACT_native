@@ -44,6 +44,10 @@ case "$image" in
     fi
     exit 0 ;;
   *cosign*)
+    case "$1" in
+      attest|verify|verify-attestation)
+        [[ "$*" != *--registry-referrers-mode* ]] || exit 97 ;;
+    esac
     if [[ "$1" == public-key ]]; then echo "-----BEGIN PUBLIC KEY-----"; fi
     exit 0 ;;
 esac
@@ -85,7 +89,7 @@ done
 : > "$STUB_LOG"
 check "a digest is signed and its SBOM attested" -- run sign harbor.test/eris/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "$work/out/api.cdx.json"
 check "the signature uses the Caltrans key and Podman-compatible format" -- grep -q "sign --yes --key /keys/cosign.key --tlog-upload=false --new-bundle-format=false --use-signing-config=false --registry-referrers-mode=legacy harbor.test/eris/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$STUB_LOG"
-check "the SBOM is attached as a legacy CycloneDX attestation" -- grep -q "attest --yes --key /keys/cosign.key --tlog-upload=false --new-bundle-format=false --use-signing-config=false --registry-referrers-mode=legacy --type cyclonedx --predicate /sbom/api.cdx.json" "$STUB_LOG"
+check "the SBOM is attached as a legacy CycloneDX attestation" -- grep -q "attest --yes --key /keys/cosign.key --tlog-upload=false --new-bundle-format=false --use-signing-config=false --type cyclonedx --predicate /sbom/api.cdx.json" "$STUB_LOG"
 check "private credentials are readable through the rootless identity mapping" -- grep -q -- "--userns=keep-id --user $(id -u):$(id -g)" "$STUB_LOG"
 check "the signer has no capabilities and cannot gain new privileges" -- grep -q -- '--cap-drop=ALL --security-opt=no-new-privileges --read-only' "$STUB_LOG"
 check "the key password is passed by name, never by value" -- bash -c '! grep -q "not-logged" "$0"' "$STUB_LOG"

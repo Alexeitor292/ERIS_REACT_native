@@ -100,7 +100,7 @@ if bash "$gate" verify "$approved" "$work/keys/wrong.pub" > "$work/wrong-key.log
   echo 'FAIL signature accepted an unrelated public key' >&2; exit 1
 fi
 tool verify-attestation --key /work/approved.pub --type cyclonedx --insecure-ignore-tlog=true \
-  --new-bundle-format=false --registry-referrers-mode=legacy --registry-cacert /registry-ca.crt \
+  --new-bundle-format=false --registry-cacert /registry-ca.crt \
   "$approved" > "$work/verified-attestation.json"
 python3 - "$work/verified-attestation.json" <<'PY'
 import base64, json, sys

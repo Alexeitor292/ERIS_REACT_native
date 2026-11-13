@@ -118,8 +118,10 @@ case "${1:-}" in
     # supports this explicit compatibility mode; its defaults use newer bundles.
     cosign "$keydir" "$sbomdir" sign --yes --key "/keys/$keyname" --tlog-upload=false \
       --new-bundle-format=false --use-signing-config=false --registry-referrers-mode=legacy "$ref"
+    # In Cosign3.1.4 only sign accepts --registry-referrers-mode. Attest and
+    # verify use the legacy tag writer/reader when --new-bundle-format=false.
     cosign "$keydir" "$sbomdir" attest --yes --key "/keys/$keyname" --tlog-upload=false \
-      --new-bundle-format=false --use-signing-config=false --registry-referrers-mode=legacy \
+      --new-bundle-format=false --use-signing-config=false \
       --type cyclonedx --predicate "/sbom/$sbomname" "$ref"
     echo "release-gate: signed $ref and attached its SBOM"
     ;;
@@ -129,7 +131,7 @@ case "${1:-}" in
     [[ -f "$pub" ]] || die "missing public key $pub"
     keydir="$(cd "$(dirname "$pub")" && pwd)"
     cosign "$keydir" "$keydir" verify --key "/keys/$(basename "$pub")" --insecure-ignore-tlog=true \
-      --new-bundle-format=false --registry-referrers-mode=legacy "$ref" >/dev/null
+      --new-bundle-format=false "$ref" >/dev/null
     echo "release-gate: signature verified for $ref"
     ;;
   public-key)

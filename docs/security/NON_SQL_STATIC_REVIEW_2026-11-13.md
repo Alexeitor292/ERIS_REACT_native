@@ -42,7 +42,9 @@ agency security approval or evidence that the application has zero risk.
 Focused upload/metadata tests: **26 passed**. The full local non-DB suite after
 the upload and SMTP-context changes: **1,484 passed, 761 deselected**. The final
 SMTP production-setting addition has separate focused session/SMTP/template
-coverage: **153 passed**. Final CI validates the committed combination.
+coverage: **154 passed**. The final committed combination passed **1,494 non-DB**
+and **761 DB** tests in CI; the latter also passed against the exact patched
+MariaDB candidate.
 
 ## Finding-by-finding disposition
 
