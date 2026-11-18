@@ -1,21 +1,49 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Map from "@arcgis/core/Map";
 import MapView from "@arcgis/core/views/MapView";
 import Graphic from "@arcgis/core/Graphic";
 import GraphicsLayer from "@arcgis/core/layers/GraphicsLayer";
+import MapImageLayer from "@arcgis/core/layers/MapImageLayer";
 import Extent from "@arcgis/core/geometry/Extent";
 import Point from "@arcgis/core/geometry/Point";
 import Polyline from "@arcgis/core/geometry/Polyline";
 import SpatialReference from "@arcgis/core/geometry/SpatialReference";
 import * as reactiveUtils from "@arcgis/core/core/reactiveUtils";
 
-import type { CrossSectionControlPoint } from "./terrainCrossSectionModel";
+import { distanceMeters, type CrossSectionControlPoint } from "./terrainCrossSectionModel";
 
 const WGS84 = SpatialReference.WGS84;
 const CAPTURE_MARGIN_PX = 40;
 const FEET_PER_METER = 3.280839895;
+const USGS_CONTOURS_URL = "https://carto.nationalmap.gov/arcgis/rest/services/contours/MapServer";
 
 type CaptureRatio = "1:1" | "16:9" | "9:16";
+type CaptureBasemap = "satellite" | "contours";
+
+const CAPTURE_BASEMAPS = {
+  satellite: {
+    label: "Satellite",
+    attribution: "Powered by Esri. Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community",
+    filename: "aerial",
+  },
+  contours: {
+    label: "Contours",
+    attribution: "Source: USGS The National Map · 3D Elevation Program (3DEP)",
+    filename: "contours",
+  },
+} satisfies Record<CaptureBasemap, { label: string; attribution: string; filename: string }>;
+
+type CaptureSettings = {
+  points: CrossSectionControlPoint[];
+  ratio: CaptureRatio;
+  basemap: CaptureBasemap;
+};
+
+type CaptureImage = { jpeg: Blob; png: Blob; previewUrl: string };
+type CaptureResult = CaptureSettings & (
+  | { image: CaptureImage; error?: never }
+  | { image?: never; error: string }
+);
 
 type CapturePreset = {
   width: number;
@@ -28,21 +56,6 @@ const CAPTURE_PRESETS: Record<CaptureRatio, CapturePreset> = {
   "16:9": { width: 1920, height: 1080, label: "16:9 landscape" },
   "9:16": { width: 1080, height: 1920, label: "9:16 portrait" },
 };
-
-function distanceMeters(
-  a: Pick<CrossSectionControlPoint, "latitude" | "longitude">,
-  b: Pick<CrossSectionControlPoint, "latitude" | "longitude">,
-) {
-  const radiusM = 6_371_008.8;
-  const toRad = (value: number) => value * Math.PI / 180;
-  const lat1 = toRad(a.latitude);
-  const lat2 = toRad(b.latitude);
-  const dLat = toRad(b.latitude - a.latitude);
-  const dLon = toRad(b.longitude - a.longitude);
-  const h = Math.sin(dLat / 2) ** 2
-    + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
-  return 2 * radiusM * Math.atan2(Math.sqrt(h), Math.sqrt(Math.max(0, 1 - h)));
-}
 
 function niceFloor(value: number) {
   if (!Number.isFinite(value) || value <= 0) return 1;
@@ -60,7 +73,7 @@ function captureExtent(points: CrossSectionControlPoint[]) {
   const ymin = Math.min(...latitudes);
   const ymax = Math.max(...latitudes);
 
-  // Ensure very short cross sections still have enough aerial context to be useful.
+  // Keep some surrounding terrain in view for very short cross sections.
   const lonSpan = Math.max(xmax - xmin, 0.00045);
   const latSpan = Math.max(ymax - ymin, 0.00045);
   const lonPad = lonSpan * 0.34;
@@ -202,9 +215,8 @@ function drawScaleBar(
   ctx.restore();
 }
 
-function drawAttribution(ctx: CanvasRenderingContext2D, width: number, height: number) {
-  // The capture leaves out the map's own attribution, which Esri requires, so it is drawn on the image.
-  const text = "Powered by Esri. Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community";
+function drawAttribution(ctx: CanvasRenderingContext2D, width: number, height: number, text: string) {
+  // ArcGIS screenshots omit UI widgets, including the map's attribution.
   ctx.save();
   ctx.font = "500 14px system-ui, sans-serif";
   const textWidth = ctx.measureText(text).width;
@@ -222,18 +234,18 @@ function drawAttribution(ctx: CanvasRenderingContext2D, width: number, height: n
   ctx.restore();
 }
 
-function canvasBlob(canvas: HTMLCanvasElement) {
+function canvasBlob(canvas: HTMLCanvasElement, type: "image/jpeg" | "image/png") {
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob((blob) => {
-      if (blob) resolve(blob);
-      else reject(new Error("The browser could not create the JPEG image."));
-    }, "image/jpeg", 0.95);
+      if (blob?.type === type) resolve(blob);
+      else reject(new Error("The browser could not encode the capture."));
+    }, type, type === "image/jpeg" ? 0.95 : undefined);
   });
 }
 
 async function buildAerialCapture(
-  points: CrossSectionControlPoint[],
-  ratio: CaptureRatio,
+  { points, ratio, basemap }: CaptureSettings,
+  signal: AbortSignal,
 ) {
   const preset = CAPTURE_PRESETS[ratio];
   const host = document.createElement("div");
@@ -245,18 +257,36 @@ async function buildAerialCapture(
   host.style.height = `${preset.height}px`;
   host.style.pointerEvents = "none";
   host.style.opacity = "0";
-  document.body.appendChild(host);
-
   const crossSectionLayer = new GraphicsLayer({ title: "Cross-section capture points" });
-  const map = new Map({ basemap: "satellite", layers: [crossSectionLayer] });
-  const view = new MapView({
-    container: host,
-    map,
-    rotation: 0,
-    constraints: { rotationEnabled: false },
+  // The dynamic contour service draws linework at scales beyond the USGS Topo tile cache.
+  const contours = basemap === "contours"
+    ? new MapImageLayer({ url: USGS_CONTOURS_URL, imageFormat: "png32" })
+    : null;
+  const map = new Map({
+    basemap: contours ? null : "satellite",
+    layers: [crossSectionLayer],
   });
+  const view = new MapView({
+    map,
+    spatialReference: SpatialReference.WebMercator,
+    background: { color: "#ffffff" },
+    rotation: 0,
+    constraints: { rotationEnabled: false, snapToZoom: false },
+    ui: { components: [] },
+  });
+  const dispose = () => {
+    contours?.destroy();
+    view.destroy();
+    host.remove();
+  };
+  signal.addEventListener("abort", dispose, { once: true });
 
   try {
+    document.body.appendChild(host);
+    view.container = host;
+    await (contours?.load({ signal }) ?? map.basemap?.loadAll());
+    signal.throwIfAborted();
+
     if (points.length >= 2) {
       crossSectionLayer.add(new Graphic({
         geometry: new Polyline({
@@ -305,20 +335,25 @@ async function buildAerialCapture(
     });
 
     await view.when();
-    view.ui.components = [];
     await view.goTo(captureExtent(points), { animate: false });
-    view.rotation = 0;
-    await reactiveUtils.whenOnce(() => !view.updating);
+    await reactiveUtils.whenOnce(() => !view.updating, signal);
 
     // Keep ArcGIS's intermediate screenshot lossless before composing overlays;
     // the final exported browser artifact is encoded as JPEG below.
     await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    signal.throwIfAborted();
 
-    const screenshot = await view.takeScreenshot({
-      width: preset.width,
-      height: preset.height,
-      format: "png",
-    });
+    // Request the contour image for the exact screenshot extent and wait for it
+    // before making the capture available.
+    const [screenshot, contourImage] = await Promise.all([
+      view.takeScreenshot({
+        width: preset.width,
+        height: preset.height,
+        format: "png",
+        ...(contours ? { layers: [crossSectionLayer], ignoreBackground: true } : {}),
+      }),
+      contours?.fetchImage(view.extent, preset.width, preset.height, { signal }),
+    ]);
 
     const canvas = document.createElement("canvas");
     canvas.width = preset.width;
@@ -327,14 +362,27 @@ async function buildAerialCapture(
     if (!ctx) throw new Error("The browser could not create the capture canvas.");
 
     ctx.putImageData(screenshot.data, 0, 0);
+    if (contourImage) {
+      ctx.save();
+      ctx.globalCompositeOperation = "destination-over";
+      ctx.drawImage(contourImage, 0, 0, preset.width, preset.height);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, preset.width, preset.height);
+      ctx.restore();
+    }
     drawNorthArrow(ctx, preset.width);
     drawScaleBar(ctx, view, preset.width, preset.height);
-    drawAttribution(ctx, preset.width, preset.height);
+    drawAttribution(ctx, preset.width, preset.height, CAPTURE_BASEMAPS[basemap].attribution);
 
-    return canvasBlob(canvas);
+    // Pre-encode PNG so the clipboard write can start within the button's click event.
+    const [jpeg, png] = await Promise.all([
+      canvasBlob(canvas, "image/jpeg"),
+      canvasBlob(canvas, "image/png"),
+    ]);
+    return { jpeg, png };
   } finally {
-    view.destroy();
-    host.remove();
+    signal.removeEventListener("abort", dispose);
+    if (!signal.aborted) dispose();
   }
 }
 
@@ -346,78 +394,71 @@ export default function AerialCaptureDialog({
   onClose: () => void;
 }) {
   const [ratio, setRatio] = useState<CaptureRatio>("1:1");
-  const [blob, setBlob] = useState<Blob | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [busy, setBusy] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const generationRef = useRef(0);
-  const pointsSignature = useMemo(
-    () => points.map((point) => `${point.longitude.toFixed(7)},${point.latitude.toFixed(7)}`).join("|"),
-    [points],
-  );
+  const [basemap, setBasemap] = useState<CaptureBasemap>("satellite");
+  const [result, setResult] = useState<CaptureResult | null>(null);
+  const [feedback, setFeedback] = useState<{ image: CaptureImage; message: string; error?: boolean } | null>(null);
+  const current = result?.points === points && result.ratio === ratio && result.basemap === basemap
+    ? result
+    : null;
+  const capture = current?.image;
+  const actionFeedback = feedback?.image === capture ? feedback : null;
+  const error = current?.error ?? (actionFeedback?.error ? actionFeedback.message : null);
 
   useEffect(() => {
-    const generation = ++generationRef.current;
-    let objectUrl: string | null = null;
-    let cancelled = false;
-    setBusy(true);
-    setError(null);
-    setNotice(null);
-    setBlob(null);
-    setPreviewUrl((current) => {
-      if (current) URL.revokeObjectURL(current);
-      return null;
-    });
+    const controller = new AbortController();
+    const settings = { points, ratio, basemap };
+    let previewUrl: string | undefined;
+    setResult(null);
+    setFeedback(null);
+    const timeout = window.setTimeout(() => {
+      controller.abort();
+      setResult({ ...settings, error: "The map took too long to load. Reopen Capture to try again." });
+    }, 30_000);
 
-    void buildAerialCapture(points, ratio)
-      .then((nextBlob) => {
-        if (cancelled || generation !== generationRef.current) return;
-        objectUrl = URL.createObjectURL(nextBlob);
-        setBlob(nextBlob);
-        setPreviewUrl(objectUrl);
+    void buildAerialCapture(settings, controller.signal)
+      .then(({ jpeg, png }) => {
+        if (controller.signal.aborted) return;
+        previewUrl = URL.createObjectURL(jpeg);
+        setResult({ ...settings, image: { jpeg, png, previewUrl } });
       })
-      .catch((reason: unknown) => {
-        if (cancelled || generation !== generationRef.current) return;
-        setError(reason instanceof Error ? reason.message : "Failed to generate the aerial capture.");
+      .catch(() => {
+        if (controller.signal.aborted) return;
+        setResult({ ...settings, error: `Could not generate the ${CAPTURE_BASEMAPS[basemap].label.toLowerCase()} capture. Reopen Capture to try again.` });
       })
-      .finally(() => {
-        if (!cancelled && generation === generationRef.current) setBusy(false);
-      });
+      .finally(() => window.clearTimeout(timeout));
 
     return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      controller.abort();
+      window.clearTimeout(timeout);
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
     };
-  }, [pointsSignature, ratio]);
+  }, [points, ratio, basemap]);
 
   function download() {
-    if (!blob) return;
-    const url = URL.createObjectURL(blob);
+    if (!capture) return;
     const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `eris-cross-section-aerial-${ratio.replace(":", "x")}.jpg`;
+    anchor.href = capture.previewUrl;
+    anchor.download = `eris-cross-section-${CAPTURE_BASEMAPS[basemap].filename}-${ratio.replace(":", "x")}.jpg`;
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
-    setNotice("JPEG downloaded.");
+    setFeedback({ image: capture, message: "JPEG download started." });
   }
 
   async function copyToClipboard() {
-    if (!blob) return;
-    setError(null);
-    setNotice(null);
+    if (!capture) return;
+    setFeedback(null);
+    if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
+      setFeedback({ image: capture, error: true, message: "Image copying is unavailable in this browser. Use Download JPEG." });
+      return;
+    }
     try {
-      if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
-        throw new Error("This browser does not support copying JPEG images to the clipboard.");
-      }
       await navigator.clipboard.write([
-        new ClipboardItem({ "image/jpeg": blob }),
+        new ClipboardItem({ "image/png": capture.png }),
       ]);
-      setNotice("JPEG copied to clipboard.");
-    } catch (reason: unknown) {
-      setError(reason instanceof Error ? reason.message : "The browser blocked clipboard image access.");
+      setFeedback({ image: capture, message: "Image copied to clipboard." });
+    } catch {
+      setFeedback({ image: capture, error: true, message: "The browser blocked image copying. Use Download JPEG." });
     }
   }
 
@@ -434,28 +475,48 @@ export default function AerialCaptureDialog({
         <div className="overflow-y-auto border-b border-[var(--line)] p-5 lg:border-b-0 lg:border-r">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <div id="aerial-capture-title" className="text-lg font-semibold">Aerial capture</div>
+              <div id="aerial-capture-title" className="text-lg font-semibold">Cross-section capture</div>
               <div className="mt-1 text-sm leading-5 text-muted">
-                Export the current cross-section points on north-up aerial imagery.
+                Export the current cross-section points on a north-up map.
               </div>
             </div>
             <button
               type="button"
               onClick={onClose}
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[var(--line)] bg-[var(--panel-soft)] text-lg"
-              aria-label="Close aerial capture"
+              aria-label="Close capture"
             >
               ×
             </button>
           </div>
 
-          <div className="mt-5">
-            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">Format</div>
-            <div className="mt-2 grid grid-cols-3 gap-2">
-              {(["1:1", "16:9", "9:16"] as CaptureRatio[]).map((value) => (
+          <fieldset className="mt-5">
+            <legend className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">Map background</legend>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {(["satellite", "contours"] as const).map((value) => (
                 <button
                   key={value}
                   type="button"
+                  aria-pressed={basemap === value}
+                  onClick={() => setBasemap(value)}
+                  className={`rounded-lg border px-3 py-3 text-sm font-semibold ${basemap === value
+                    ? "border-[var(--brand)] bg-[color:color-mix(in_oklab,var(--brand)_10%,transparent)] text-[var(--brand)]"
+                    : "border-[var(--line)] bg-[var(--panel-soft)] hover:bg-[var(--panel)]"}`}
+                >
+                  {CAPTURE_BASEMAPS[value].label}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+
+          <fieldset className="mt-5">
+            <legend className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">Aspect ratio</legend>
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              {(["1:1", "16:9", "9:16"] as const).map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={ratio === value}
                   onClick={() => setRatio(value)}
                   className={`rounded-lg border px-3 py-3 text-sm font-semibold ${ratio === value
                     ? "border-[var(--brand)] bg-[color:color-mix(in_oklab,var(--brand)_10%,transparent)] text-[var(--brand)]"
@@ -466,21 +527,9 @@ export default function AerialCaptureDialog({
               ))}
             </div>
             <div className="mt-2 text-xs text-muted">
-              {preset.width.toLocaleString()} × {preset.height.toLocaleString()} JPEG · {preset.label}
+              {preset.width.toLocaleString()} × {preset.height.toLocaleString()} · {preset.label}
             </div>
-          </div>
-
-          <div className="mt-5 rounded-xl border border-[var(--line)] bg-[var(--panel-soft)] p-4 text-sm">
-            <div className="font-semibold">Capture standard</div>
-            <div className="mt-2 space-y-1.5 text-xs leading-5 text-muted">
-              <div>✓ Always north-up</div>
-              <div>✓ Top-down aerial imagery</div>
-              <div>✓ P1–P{points.length} labels and cross-section line</div>
-              <div>✓ North indicator</div>
-              <div>✓ Scale in feet</div>
-              <div>✓ JPEG export</div>
-            </div>
-          </div>
+          </fieldset>
 
           {error ? (
             <div role="alert" className="mt-4 rounded-lg border border-red-300/50 bg-red-950/80 px-3 py-2 text-sm text-red-50">
@@ -488,9 +537,9 @@ export default function AerialCaptureDialog({
             </div>
           ) : null}
 
-          {notice ? (
-            <div className="mt-4 rounded-lg border border-emerald-300/40 bg-emerald-950/70 px-3 py-2 text-sm text-emerald-50">
-              {notice}
+          {actionFeedback && !actionFeedback.error ? (
+            <div role="status" className="mt-4 rounded-lg border border-emerald-300/40 bg-emerald-950/70 px-3 py-2 text-sm text-emerald-50">
+              {actionFeedback.message}
             </div>
           ) : null}
 
@@ -498,15 +547,15 @@ export default function AerialCaptureDialog({
             <button
               type="button"
               onClick={() => void copyToClipboard()}
-              disabled={!blob || busy}
+              disabled={!capture}
               className="rounded-lg bg-[var(--brand)] px-4 py-2.5 text-sm font-semibold text-white hover:brightness-95 disabled:opacity-40"
             >
-              Copy JPEG to clipboard
+              Copy image to clipboard
             </button>
             <button
               type="button"
               onClick={download}
-              disabled={!blob || busy}
+              disabled={!capture}
               className="rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] px-4 py-2.5 text-sm font-semibold hover:bg-[var(--panel)] disabled:opacity-40"
             >
               Download JPEG
@@ -514,22 +563,22 @@ export default function AerialCaptureDialog({
           </div>
 
           <div className="mt-3 text-[11px] leading-5 text-muted">
-            Capture files stay in the browser. ERIS does not upload them or save them to the database.
+            Capture files stay in the browser.
           </div>
         </div>
 
         <div className="flex min-h-[420px] items-center justify-center overflow-auto bg-slate-950 p-5">
-          {busy ? (
-            <div className="text-sm text-white/75">Preparing north-up aerial capture…</div>
-          ) : previewUrl ? (
+          {!current ? (
+            <div role="status" className="text-sm text-white/75">Preparing {CAPTURE_BASEMAPS[basemap].label.toLowerCase()} capture…</div>
+          ) : capture ? (
             <img
-              src={previewUrl}
-              alt={`North-up ${ratio} aerial capture preview of the current cross-section points`}
+              src={capture.previewUrl}
+              alt={`North-up ${ratio} ${CAPTURE_BASEMAPS[basemap].label.toLowerCase()} map with the cross-section line and points`}
               className="max-h-[84vh] max-w-full rounded-lg border border-white/15 object-contain shadow-2xl"
             />
           ) : (
             <div className="max-w-md text-center text-sm text-white/70">
-              The aerial preview could not be generated.
+              Preview unavailable.
             </div>
           )}
         </div>

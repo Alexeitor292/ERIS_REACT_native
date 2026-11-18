@@ -95,6 +95,14 @@ flowchart LR
 Settings (theme, navigation, page transitions) and sign-out are in the profile
 menu at the top right for everyone.
 
+## Capturing a terrain cross section
+
+In **GIS Tools → Terrain Cross Sections**, place at least two points and open
+**Capture**. Choose **Satellite** or **Contours** and an aspect ratio. Once the
+preview appears, use **Copy image to clipboard** to paste a PNG into another
+app, or **Download JPEG** to save a file. The image includes the labeled
+cross-section points and line, a north arrow, and a scale in feet.
+
 ## A report's journey
 
 ```mermaid
