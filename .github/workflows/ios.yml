@@ -10,6 +10,8 @@ on:
     paths: ["ios/**", ".github/workflows/ios.yml", "web/src/memoIos/**", "web/src/features/submissions/memo*",
             "web/src/index.css", "web/scripts/build-memo-ios.mjs", "web/package-lock.json"]
   pull_request:
+    # Required checks must come from a PR-associated run. workflow_dispatch can
+    # validate the branch but cannot satisfy the merge rules for a filtered PR.
     paths: ["ios/**", ".github/workflows/ios.yml", "web/src/memoIos/**", "web/src/features/submissions/memo*",
             "web/src/index.css", "web/scripts/build-memo-ios.mjs", "web/package-lock.json"]
   workflow_dispatch:
