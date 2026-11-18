@@ -113,3 +113,9 @@ much of each. **DEM coverage** colors the map by the finest USGS has at each pla
 Heights run every metre on a path of up to about 1.8 km, and further apart on longer
 ones. The profile is read in the browser and saved with the section. Sections can be
 added and edited while their project is `ACTIVE`; there is no delete.
+
+The standalone tool's **Capture** dialog renders a north-up map of the
+cross-section points in the browser. It offers Esri satellite imagery and a
+contour map powered by the USGS National Map Elevation Contours service
+(`carto.nationalmap.gov`). Both use the same cross-section geometry and export
+through the browser as a clipboard image or JPEG download.
