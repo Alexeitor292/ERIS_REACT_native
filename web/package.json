@@ -24,7 +24,7 @@
     "vite-plugin-static-copy": "^3.2.0"
   },
   "dependencies": {
-    "@arcgis/core": "^4.33.0",
+    "@arcgis/core": "^5.1.27",
     "@tiptap/extension-highlight": "^3.31.3",
     "@tiptap/extension-list": "^3.31.3",
     "@tiptap/extension-subscript": "^3.31.3",
