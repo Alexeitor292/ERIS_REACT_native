@@ -1,4 +1,4 @@
-FROM nginx:1.30.7-alpine@sha256:caf4e1e032a20f9c3c5e28fc7f25ffd768ad8677b4975c54193075997b3a97e3
+FROM nginx:1.31.8-alpine@sha256:fed7e14be83cbd2661a75cdc5b872d936cf155d46c327084d30b8df19ae88d72
 # Match the source-build image's nonroot runtime without making its config or
 # application assets writable by the web process.
 RUN apk upgrade --no-cache \
