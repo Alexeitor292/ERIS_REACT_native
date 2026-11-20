@@ -96,7 +96,7 @@ jobs:
                   print("Embedded secret:", result["Target"], finding.get("RuleID"), finding.get("Severity"))
           PY
           exit "$gate"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: report-${{ matrix.name }}
@@ -105,7 +105,7 @@ jobs:
             ${{ runner.temp }}/evidence/*.txt
           if-no-files-found: ignore
           retention-days: 30
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: candidate-${{ matrix.name }}
@@ -128,7 +128,7 @@ jobs:
           result=0
           bash deploy/ci/release-gate.sh scan "$upstream" cosign-upstream "$RUNNER_TEMP/signer-baseline" || result=$?
           echo "Upstream baseline scan exit=$result; this image never receives signing credentials."
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: signer-upstream-baseline
@@ -160,7 +160,7 @@ jobs:
         run: |
           set -o pipefail
           bash deploy/ci/tests/test-signature-chain.sh 2>&1 | tee "$RUNNER_TEMP/signature-chain.log"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: signature-chain
@@ -197,7 +197,7 @@ jobs:
           set -o pipefail
           mkdir -p "$ERIS_TEST_EVIDENCE_DIR"
           bash deploy/ci/tests/test-candidate-database.sh 2>&1 | tee "$ERIS_TEST_EVIDENCE_DIR/candidate-db.log"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: candidate-db-results
@@ -252,7 +252,7 @@ jobs:
         run: |
           set -o pipefail
           bash deploy/podman/tests/test-rootless-rehearsal.sh 2>&1 | tee "$RUNNER_TEMP/rehearsal.log"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: rootless-rehearsal
@@ -295,7 +295,7 @@ jobs:
           --signature-log "$RUNNER_TEMP/signatures/signature-chain.log"
           --database-evidence "$RUNNER_TEMP/database-integration"
           --output "$RUNNER_TEMP/ERIS-image-handoff"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ERIS-image-handoff
           path: ${{ runner.temp }}/ERIS-image-handoff/
