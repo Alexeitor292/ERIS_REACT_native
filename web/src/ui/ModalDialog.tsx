@@ -23,6 +23,7 @@ export default function ModalDialog({
   children,
   onClose,
   busy = false,
+  portalTarget,
   overlayClassName = "fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4",
   panelClassName = "w-full max-w-xl rounded-xl border border-[var(--line)] bg-[var(--panel)] p-5 shadow-2xl",
 }: {
@@ -31,6 +32,7 @@ export default function ModalDialog({
   children: ReactNode;
   onClose: () => void;
   busy?: boolean;
+  portalTarget?: Element;
   overlayClassName?: string;
   panelClassName?: string;
 }) {
@@ -126,6 +128,6 @@ export default function ModalDialog({
         {children}
       </div>
     </div>,
-    document.body,
+    portalTarget ?? document.body,
   );
 }

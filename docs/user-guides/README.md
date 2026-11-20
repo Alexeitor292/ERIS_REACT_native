@@ -97,11 +97,18 @@ menu at the top right for everyone.
 
 ## Capturing a terrain cross section
 
-In **GIS Tools → Terrain Cross Sections**, place at least two points and open
-**Capture**. Choose **Satellite** or **Contours** and an aspect ratio. Once the
-preview appears, use **Copy image to clipboard** to paste a PNG into another
-app, or **Download JPEG** to save a file. The image includes the labeled
-cross-section points and line, a north arrow, and a scale in feet.
+In **GIS Tools → Terrain Cross Sections**, use **Roads** to show highways and
+local streets on the map. Zoom in for street names. Turn on **Geology** to show
+California Geological Survey rock units, contacts, and faults. Use **CGS legend**
+to read the geology symbols. The statewide geology is published at 1:750,000
+scale and provides regional context.
+
+Place at least two points and open **Capture**. The preview starts with the
+map's overlay selections. You can choose **Satellite** or **Contours**, turn
+**Roads** and **Geology** on or off for the capture, and set the aspect ratio.
+Use **Copy image to clipboard** to paste a PNG into another app, or **Download
+JPEG** to save a file. The image includes the selected overlays, labeled points
+and line, a north arrow, a scale in feet, and source credits.
 
 ## A report's journey
 

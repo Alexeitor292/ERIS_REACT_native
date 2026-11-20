@@ -8,8 +8,20 @@ import Extent from "@arcgis/core/geometry/Extent";
 import Point from "@arcgis/core/geometry/Point";
 import Polyline from "@arcgis/core/geometry/Polyline";
 import SpatialReference from "@arcgis/core/geometry/SpatialReference";
+import { geographicToWebMercator } from "@arcgis/core/geometry/support/webMercatorUtils";
 import * as reactiveUtils from "@arcgis/core/core/reactiveUtils";
 
+import ModalDialog from "../../ui/ModalDialog";
+import {
+  createCrossSectionGeology,
+  createCrossSectionRoads,
+  CROSS_SECTION_OVERLAYS,
+  CROSS_SECTION_OVERLAY_LABELS,
+  GEOLOGY_CREDIT,
+  GEOLOGY_LEGEND_URL,
+  ROAD_CREDIT,
+  type CrossSectionOverlays,
+} from "./crossSectionMapLayers";
 import { distanceMeters, type CrossSectionControlPoint } from "./terrainCrossSectionModel";
 
 const WGS84 = SpatialReference.WGS84;
@@ -37,9 +49,10 @@ type CaptureSettings = {
   points: CrossSectionControlPoint[];
   ratio: CaptureRatio;
   basemap: CaptureBasemap;
+  overlays: CrossSectionOverlays;
 };
 
-type CaptureImage = { jpeg: Blob; png: Blob; previewUrl: string };
+type CaptureImage = { png: Blob; previewUrl: string };
 type CaptureResult = CaptureSettings & (
   | { image: CaptureImage; error?: never }
   | { image?: never; error: string }
@@ -215,13 +228,13 @@ function drawScaleBar(
   ctx.restore();
 }
 
-function drawAttribution(ctx: CanvasRenderingContext2D, width: number, height: number, text: string) {
+function drawAttribution(ctx: CanvasRenderingContext2D, width: number, height: number, credits: string[]) {
   // ArcGIS screenshots omit UI widgets, including the map's attribution.
   ctx.save();
   ctx.font = "500 14px system-ui, sans-serif";
-  const textWidth = ctx.measureText(text).width;
-  const panelWidth = textWidth + 24;
-  const panelHeight = 32;
+  const textWidth = Math.max(...credits.map((credit) => ctx.measureText(credit).width));
+  const panelWidth = Math.min(textWidth + 24, width - 440);
+  const panelHeight = credits.length * 20 + 12;
   const x = width - CAPTURE_MARGIN_PX - panelWidth;
   const y = height - CAPTURE_MARGIN_PX - panelHeight;
   addRoundedRect(ctx, x, y, panelWidth, panelHeight, 8);
@@ -230,7 +243,7 @@ function drawAttribution(ctx: CanvasRenderingContext2D, width: number, height: n
   ctx.fillStyle = "#334155";
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
-  ctx.fillText(text, x + 12, y + panelHeight / 2);
+  credits.forEach((credit, index) => ctx.fillText(credit, x + 12, y + 16 + index * 20, panelWidth - 24));
   ctx.restore();
 }
 
@@ -244,7 +257,7 @@ function canvasBlob(canvas: HTMLCanvasElement, type: "image/jpeg" | "image/png")
 }
 
 async function buildAerialCapture(
-  { points, ratio, basemap }: CaptureSettings,
+  { points, ratio, basemap, overlays }: CaptureSettings,
   signal: AbortSignal,
 ) {
   const preset = CAPTURE_PRESETS[ratio];
@@ -262,13 +275,16 @@ async function buildAerialCapture(
   const contours = basemap === "contours"
     ? new MapImageLayer({ url: USGS_CONTOURS_URL, imageFormat: "png32" })
     : null;
+  const roads = overlays.roads ? createCrossSectionRoads() : null;
+  const geology = overlays.geology ? createCrossSectionGeology() : [];
   const map = new Map({
     basemap: contours ? null : "satellite",
-    layers: [crossSectionLayer],
+    layers: [...geology, crossSectionLayer],
   });
   const view = new MapView({
     map,
     spatialReference: SpatialReference.WebMercator,
+    extent: geographicToWebMercator(captureExtent(points)) as Extent,
     background: { color: "#ffffff" },
     rotation: 0,
     constraints: { rotationEnabled: false, snapToZoom: false },
@@ -276,6 +292,7 @@ async function buildAerialCapture(
   });
   const dispose = () => {
     contours?.destroy();
+    roads?.destroy();
     view.destroy();
     host.remove();
   };
@@ -284,7 +301,11 @@ async function buildAerialCapture(
   try {
     document.body.appendChild(host);
     view.container = host;
-    await (contours?.load({ signal }) ?? map.basemap?.loadAll());
+    await Promise.all([
+      contours?.load({ signal }) ?? map.basemap?.loadAll(),
+      roads?.load({ signal }),
+      ...geology.map((layer) => layer.load({ signal })),
+    ]);
     signal.throwIfAborted();
 
     if (points.length >= 2) {
@@ -335,25 +356,23 @@ async function buildAerialCapture(
     });
 
     await view.when();
-    await view.goTo(captureExtent(points), { animate: false });
-    await reactiveUtils.whenOnce(() => !view.updating, signal);
-
-    // Keep ArcGIS's intermediate screenshot lossless before composing overlays;
-    // the final exported browser artifact is encoded as JPEG below.
+    await Promise.all(geology.map((layer) => view.whenLayerView(layer)));
     await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    await reactiveUtils.whenOnce(() => !view.updating, signal);
     signal.throwIfAborted();
 
-    // Request the contour image for the exact screenshot extent and wait for it
-    // before making the capture available.
-    const [screenshot, contourImage] = await Promise.all([
-      view.takeScreenshot({
-        width: preset.width,
-        height: preset.height,
-        format: "png",
-        ...(contours ? { layers: [crossSectionLayer], ignoreBackground: true } : {}),
-      }),
+    // Request linework at the final extent. Put it between the map background
+    // and the cross-section graphics so road and contour lines stay distinct.
+    const [roadImage, contourImage] = await Promise.all([
+      roads?.fetchImage(view.extent, preset.width, preset.height, { signal }),
       contours?.fetchImage(view.extent, preset.width, preset.height, { signal }),
     ]);
+    const imageOptions = { width: preset.width, height: preset.height, format: "png" as const };
+    const composeLinework = Boolean(roadImage || contourImage);
+    const screenshot = await view.takeScreenshot({
+      ...imageOptions,
+      ...(composeLinework ? { layers: [crossSectionLayer], ignoreBackground: true } : {}),
+    });
 
     const canvas = document.createElement("canvas");
     canvas.width = preset.width;
@@ -362,17 +381,29 @@ async function buildAerialCapture(
     if (!ctx) throw new Error("The browser could not create the capture canvas.");
 
     ctx.putImageData(screenshot.data, 0, 0);
-    if (contourImage) {
+    if (composeLinework) {
       ctx.save();
       ctx.globalCompositeOperation = "destination-over";
-      ctx.drawImage(contourImage, 0, 0, preset.width, preset.height);
+      if (roadImage) ctx.drawImage(roadImage, 0, 0, preset.width, preset.height);
+      if (contourImage) ctx.drawImage(contourImage, 0, 0, preset.width, preset.height);
+      const backgroundLayers = [...(map.basemap?.baseLayers.toArray() ?? []), ...geology];
+      if (backgroundLayers.length) {
+        const background = await view.takeScreenshot({ ...imageOptions, layers: backgroundLayers });
+        const bitmap = await createImageBitmap(background.data);
+        ctx.drawImage(bitmap, 0, 0);
+        bitmap.close();
+      }
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, preset.width, preset.height);
       ctx.restore();
     }
     drawNorthArrow(ctx, preset.width);
     drawScaleBar(ctx, view, preset.width, preset.height);
-    drawAttribution(ctx, preset.width, preset.height, CAPTURE_BASEMAPS[basemap].attribution);
+    drawAttribution(ctx, preset.width, preset.height, [
+      CAPTURE_BASEMAPS[basemap].attribution,
+      ...(overlays.roads ? [ROAD_CREDIT] : []),
+      ...(overlays.geology ? [GEOLOGY_CREDIT] : []),
+    ]);
 
     // Pre-encode PNG so the clipboard write can start within the button's click event.
     const [jpeg, png] = await Promise.all([
@@ -388,16 +419,21 @@ async function buildAerialCapture(
 
 export default function AerialCaptureDialog({
   points,
+  initialBasemap,
+  initialOverlays,
   onClose,
 }: {
   points: CrossSectionControlPoint[];
+  initialBasemap: CaptureBasemap;
+  initialOverlays: CrossSectionOverlays;
   onClose: () => void;
 }) {
   const [ratio, setRatio] = useState<CaptureRatio>("1:1");
-  const [basemap, setBasemap] = useState<CaptureBasemap>("satellite");
+  const [basemap, setBasemap] = useState(initialBasemap);
+  const [overlays, setOverlays] = useState(initialOverlays);
   const [result, setResult] = useState<CaptureResult | null>(null);
   const [feedback, setFeedback] = useState<{ image: CaptureImage; message: string; error?: boolean } | null>(null);
-  const current = result?.points === points && result.ratio === ratio && result.basemap === basemap
+  const current = result?.points === points && result.ratio === ratio && result.basemap === basemap && result.overlays === overlays
     ? result
     : null;
   const capture = current?.image;
@@ -406,7 +442,7 @@ export default function AerialCaptureDialog({
 
   useEffect(() => {
     const controller = new AbortController();
-    const settings = { points, ratio, basemap };
+    const settings = { points, ratio, basemap, overlays };
     let previewUrl: string | undefined;
     setResult(null);
     setFeedback(null);
@@ -419,7 +455,7 @@ export default function AerialCaptureDialog({
       .then(({ jpeg, png }) => {
         if (controller.signal.aborted) return;
         previewUrl = URL.createObjectURL(jpeg);
-        setResult({ ...settings, image: { jpeg, png, previewUrl } });
+        setResult({ ...settings, image: { png, previewUrl } });
       })
       .catch(() => {
         if (controller.signal.aborted) return;
@@ -432,13 +468,14 @@ export default function AerialCaptureDialog({
       window.clearTimeout(timeout);
       if (previewUrl) URL.revokeObjectURL(previewUrl);
     };
-  }, [points, ratio, basemap]);
+  }, [points, ratio, basemap, overlays]);
 
   function download() {
     if (!capture) return;
     const anchor = document.createElement("a");
     anchor.href = capture.previewUrl;
-    anchor.download = `eris-cross-section-${CAPTURE_BASEMAPS[basemap].filename}-${ratio.replace(":", "x")}.jpg`;
+    const layerSuffix = CROSS_SECTION_OVERLAYS.filter((id) => overlays[id]).map((id) => `-${id}`).join("");
+    anchor.download = `eris-cross-section-${CAPTURE_BASEMAPS[basemap].filename}${layerSuffix}-${ratio.replace(":", "x")}.jpg`;
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
@@ -465,18 +502,19 @@ export default function AerialCaptureDialog({
   const preset = CAPTURE_PRESETS[ratio];
 
   return (
-    <div className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="aerial-capture-title"
-        className="grid max-h-[94vh] w-full max-w-5xl overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--panel)] shadow-2xl lg:grid-cols-[340px_minmax(0,1fr)]"
-      >
+    <ModalDialog
+      titleId="aerial-capture-title"
+      descriptionId="aerial-capture-description"
+      onClose={onClose}
+      portalTarget={document.fullscreenElement ?? undefined}
+      overlayClassName="fixed inset-0 z-[150] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm"
+      panelClassName="grid max-h-[calc(100dvh-2rem)] w-full max-w-5xl grid-rows-[minmax(0,3fr)_minmax(0,2fr)] overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--panel)] shadow-2xl lg:grid-cols-[340px_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)]"
+    >
         <div className="overflow-y-auto border-b border-[var(--line)] p-5 lg:border-b-0 lg:border-r">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <div id="aerial-capture-title" className="text-lg font-semibold">Cross-section capture</div>
-              <div className="mt-1 text-sm leading-5 text-muted">
+              <h2 id="aerial-capture-title" className="text-lg font-semibold">Cross-section capture</h2>
+              <div id="aerial-capture-description" className="mt-1 text-sm leading-5 text-muted">
                 Export the current cross-section points on a north-up map.
               </div>
             </div>
@@ -507,6 +545,27 @@ export default function AerialCaptureDialog({
                 </button>
               ))}
             </div>
+          </fieldset>
+
+          <fieldset className="mt-5">
+            <legend className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">Overlays</legend>
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-sm">
+              {CROSS_SECTION_OVERLAYS.map((id) => (
+                <label key={id} className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={overlays[id]}
+                    onChange={(event) => setOverlays({ ...overlays, [id]: event.target.checked })}
+                  />
+                  {CROSS_SECTION_OVERLAY_LABELS[id]}
+                </label>
+              ))}
+            </div>
+            {overlays.geology ? (
+              <a href={GEOLOGY_LEGEND_URL} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs text-muted underline">
+                California Geological Survey legend · 1:750,000
+              </a>
+            ) : null}
           </fieldset>
 
           <fieldset className="mt-5">
@@ -567,14 +626,14 @@ export default function AerialCaptureDialog({
           </div>
         </div>
 
-        <div className="flex min-h-[420px] items-center justify-center overflow-auto bg-slate-950 p-5">
+        <div className="flex min-h-0 items-center justify-center overflow-hidden bg-slate-950 p-5 lg:min-h-[420px]">
           {!current ? (
             <div role="status" className="text-sm text-white/75">Preparing {CAPTURE_BASEMAPS[basemap].label.toLowerCase()} capture…</div>
           ) : capture ? (
             <img
               src={capture.previewUrl}
               alt={`North-up ${ratio} ${CAPTURE_BASEMAPS[basemap].label.toLowerCase()} map with the cross-section line and points`}
-              className="max-h-[84vh] max-w-full rounded-lg border border-white/15 object-contain shadow-2xl"
+              className="max-h-full max-w-full rounded-lg border border-white/15 object-contain shadow-2xl lg:max-h-[84vh]"
             />
           ) : (
             <div className="max-w-md text-center text-sm text-white/70">
@@ -582,7 +641,6 @@ export default function AerialCaptureDialog({
             </div>
           )}
         </div>
-      </div>
-    </div>
+    </ModalDialog>
   );
 }

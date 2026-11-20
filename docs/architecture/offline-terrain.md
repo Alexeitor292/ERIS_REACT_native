@@ -117,5 +117,10 @@ added and edited while their project is `ACTIVE`; there is no delete.
 The standalone tool's **Capture** dialog renders a north-up map of the
 cross-section points in the browser. It offers Esri satellite imagery and a
 contour map powered by the USGS National Map Elevation Contours service
-(`carto.nationalmap.gov`). Both use the same cross-section geometry and export
-through the browser as a clipboard image or JPEG download.
+(`carto.nationalmap.gov`). The 3D workspace and both capture backgrounds support
+two independent overlays. Roads and labels use USGS National Map Transportation.
+Geology uses the California Geological Survey's 2010 Geologic Map of California
+(`gis.conservation.ca.gov`, published at 1:750,000). The geology overlay draws the
+CGS cached map at statewide scales and the published rock units, contacts, and
+faults at closer scales. The capture inherits the workspace selection and lets
+the user adjust it before copying a clipboard image or downloading a JPEG.
