@@ -5,6 +5,7 @@ import Basemap from "@arcgis/core/Basemap";
 import SceneView from "@arcgis/core/views/SceneView";
 import Graphic from "@arcgis/core/Graphic";
 import GraphicsLayer from "@arcgis/core/layers/GraphicsLayer";
+import GroupLayer from "@arcgis/core/layers/GroupLayer";
 import Point from "@arcgis/core/geometry/Point";
 import Polyline from "@arcgis/core/geometry/Polyline";
 import SpatialReference from "@arcgis/core/geometry/SpatialReference";
@@ -17,6 +18,14 @@ import type { SavedCrossSectionDetail } from "../../api/terrainCrossSections";
 import AerialCaptureDialog from "./AerialCaptureDialog";
 import CrossSectionProfileChart from "./CrossSectionProfileChart";
 import CrossSectionSaveDialog from "./CrossSectionSaveDialog";
+import {
+  createCrossSectionGeology,
+  createCrossSectionRoads,
+  CROSS_SECTION_OVERLAYS,
+  CROSS_SECTION_OVERLAY_LABELS,
+  GEOLOGY_LEGEND_URL,
+  type CrossSectionOverlays,
+} from "./crossSectionMapLayers";
 import {
   createDemResolutionCoverageLayer,
   refreshDemResolutionCoverageLayer,
@@ -75,6 +84,7 @@ export default function TerrainCrossSectionWorkspace() {
   const viewRef = useRef<SceneView | null>(null);
   const mapRef = useRef<Map | null>(null);
   const demCoverageLayerRef = useRef<ReturnType<typeof createDemResolutionCoverageLayer> | null>(null);
+  const mapOverlaysRef = useRef<{ roads: ReturnType<typeof createCrossSectionRoads>; geology: GroupLayer } | null>(null);
   const controlLayerRef = useRef<GraphicsLayer | null>(null);
   const profileLayerRef = useRef<GraphicsLayer | null>(null);
   const hoverLayerRef = useRef<GraphicsLayer | null>(null);
@@ -92,6 +102,7 @@ export default function TerrainCrossSectionWorkspace() {
   const [demCoverageVisible, setDemCoverageVisible] = useState(false);
   const [demCoverageProblem, setDemCoverageProblem] = useState(false);
   const [basemapMode, setBasemapMode] = useState<BasemapMode>("satellite");
+  const [overlays, setOverlays] = useState<CrossSectionOverlays>({ roads: false, geology: false });
   const [sceneScale, setSceneScale] = useState<number | null>(null);
   const [activePanel, setActivePanel] = useState<WorkspacePanel | null>(null);
   const [focusMode, setFocusMode] = useState(false);
@@ -154,7 +165,7 @@ export default function TerrainCrossSectionWorkspace() {
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && document.fullscreenElement !== workspaceRef.current) {
+      if (!event.defaultPrevented && event.key === "Escape" && document.fullscreenElement !== workspaceRef.current) {
         setFocusMode(false);
       }
     };
@@ -206,6 +217,9 @@ export default function TerrainCrossSectionWorkspace() {
     setSceneError(null);
 
     const demCoverageLayer = createDemResolutionCoverageLayer();
+    const roads = createCrossSectionRoads();
+    roads.visible = false;
+    const geology = new GroupLayer({ title: "California geology", visible: false, layers: createCrossSectionGeology() });
     const controlLayer = new GraphicsLayer({ title: "Cross-section control points" });
     const profileLayer = new GraphicsLayer({ title: "DEM cross-section profile" });
     const hoverLayer = new GraphicsLayer({ title: "Cross-section cursor" });
@@ -214,6 +228,7 @@ export default function TerrainCrossSectionWorkspace() {
     (hoverLayer as unknown as { elevationInfo: unknown }).elevationInfo = { mode: "absolute-height" };
 
     demCoverageLayerRef.current = demCoverageLayer;
+    mapOverlaysRef.current = { roads, geology };
     controlLayerRef.current = controlLayer;
     profileLayerRef.current = profileLayer;
     hoverLayerRef.current = hoverLayer;
@@ -221,7 +236,7 @@ export default function TerrainCrossSectionWorkspace() {
     const map = new Map({
       basemap: "satellite",
       ground: "world-elevation",
-      layers: [demCoverageLayer, controlLayer, profileLayer, hoverLayer],
+      layers: [geology, demCoverageLayer, roads, controlLayer, profileLayer, hoverLayer],
     });
     mapRef.current = map;
 
@@ -301,6 +316,7 @@ export default function TerrainCrossSectionWorkspace() {
       home?.destroy();
       compass?.destroy();
       demCoverageLayerRef.current = null;
+      mapOverlaysRef.current = null;
       controlLayerRef.current = null;
       profileLayerRef.current = null;
       hoverLayerRef.current = null;
@@ -317,6 +333,13 @@ export default function TerrainCrossSectionWorkspace() {
     const basemap = Basemap.fromId(basemapMode);
     if (basemap) map.basemap = basemap;
   }, [basemapMode]);
+
+  useEffect(() => {
+    const layers = mapOverlaysRef.current;
+    if (!layers) return;
+    layers.roads.visible = overlays.roads;
+    layers.geology.visible = overlays.geology;
+  }, [overlays]);
 
   useEffect(() => {
     const layer = controlLayerRef.current;
@@ -876,21 +899,38 @@ export default function TerrainCrossSectionWorkspace() {
         ) : null}
       </aside>
 
-      <div className="absolute bottom-3 left-3 z-20 flex overflow-hidden rounded-lg border border-white/20 bg-black/55 text-[11px] text-white backdrop-blur-sm">
+      <div role="group" aria-label="Map backgrounds and overlays" className="absolute bottom-14 left-3 z-20 flex max-w-[calc(100%-1.5rem)] flex-wrap overflow-hidden rounded-lg border border-white/20 bg-black/65 text-[11px] text-white backdrop-blur-sm">
         {(["satellite", "topo-vector"] as BasemapMode[]).map((mode) => (
           <button
             key={mode}
             type="button"
+            aria-pressed={basemapMode === mode}
             onClick={() => setBasemapMode(mode)}
             className={`px-3 py-2 ${basemapMode === mode ? "bg-white/20 font-semibold" : "hover:bg-white/10"}`}
           >
             {mode === "satellite" ? "Imagery" : "Topographic"}
           </button>
         ))}
+        {CROSS_SECTION_OVERLAYS.map((id) => (
+          <button
+            key={id}
+            type="button"
+            aria-pressed={overlays[id]}
+            onClick={() => setOverlays((current) => ({ ...current, [id]: !current[id] }))}
+            className={`px-3 py-2 ${overlays[id] ? "bg-white/20 font-semibold" : "hover:bg-white/10"}`}
+          >
+            {CROSS_SECTION_OVERLAY_LABELS[id]}
+          </button>
+        ))}
+        {overlays.geology ? (
+          <a href={GEOLOGY_LEGEND_URL} target="_blank" rel="noreferrer" className="px-3 py-2 underline hover:bg-white/10">
+            CGS legend
+          </a>
+        ) : null}
       </div>
 
       {demCoverageVisible ? (
-        <div className="pointer-events-none absolute bottom-14 left-3 z-20 w-64 rounded-lg border border-white/20 bg-slate-950/85 p-3 text-white shadow-lg backdrop-blur-md">
+        <div className="pointer-events-none absolute bottom-36 left-3 z-20 w-64 rounded-lg border border-white/20 bg-slate-950/85 p-3 text-white shadow-lg backdrop-blur-md sm:bottom-24">
           <div className="text-xs font-semibold">Finest USGS elevation here</div>
           <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5">
             {DEM_COVERAGE_LEGEND.map((item) => (
@@ -966,6 +1006,8 @@ export default function TerrainCrossSectionWorkspace() {
       {captureDialogOpen ? (
         <AerialCaptureDialog
           points={controlPoints}
+          initialBasemap={basemapMode === "satellite" ? "satellite" : "contours"}
+          initialOverlays={overlays}
           onClose={() => setCaptureDialogOpen(false)}
         />
       ) : null}
