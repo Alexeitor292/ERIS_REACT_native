@@ -49,7 +49,7 @@ python-multipart==0.0.33
 PyYAML==6.0.3
 rasterio==1.5.2
 requests==2.34.2
-SQLAlchemy==2.1.8
+SQLAlchemy==2.1.9
 starlette==1.10.0
 typing-inspection==0.4.5
 typing_extensions==4.16.0
