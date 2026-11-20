@@ -1,7 +1,7 @@
 # Rasterio has no musllinux wheel: build its pinned source against GDAL in
 # a disposable compiler stage, then retain only runtime GDAL and Python wheels.
 # Keep apk and Python package metadata intact for vulnerability/SBOM scans.
-FROM python:3.12-alpine@sha256:c5ba3deef00c7758561a0f03c26f44f10589263d40e732b8748e0d1f38f6dd89 AS wheels
+FROM python:3.15-alpine@sha256:0f9552bb28711333da16915ec146f5e6bb44a7fdac9ced15dc17c2e0206346dd AS wheels
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /build
 ENV GDAL_CONFIG=/usr/bin/gdal-config
@@ -9,7 +9,7 @@ ARG GDAL_PACKAGE_VERSION=3.13.3-r0
 RUN apk upgrade --no-cache && apk add --no-cache build-base "gdal-dev=${GDAL_PACKAGE_VERSION}"
 COPY requirements.txt requirements-worker.txt constraints.txt ./
 RUN pip install --no-cache-dir --upgrade pip==26.3 setuptools==84.2.1 && pip wheel --no-cache-dir --no-binary=rasterio --wheel-dir /wheels -r requirements-worker.txt
-FROM python:3.12-alpine@sha256:c5ba3deef00c7758561a0f03c26f44f10589263d40e732b8748e0d1f38f6dd89
+FROM python:3.15-alpine@sha256:0f9552bb28711333da16915ec146f5e6bb44a7fdac9ced15dc17c2e0206346dd
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 ENV GDAL_DATA=/usr/share/gdal PROJ_DATA=/usr/share/proj
