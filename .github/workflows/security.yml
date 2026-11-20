@@ -24,7 +24,7 @@ jobs:
           zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
           git /repo --log-opts=--all --gitleaks-ignore-path /repo/.gitleaksignore --redact=100 --report-format json
           --report-path /report/gitleaks.json --no-banner
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: secret-scan
@@ -43,7 +43,7 @@ jobs:
         run: bandit -r backend/app -f json -o bandit.json --exit-zero
       - name: Refuse high-severity high-confidence findings
         run: bandit -r backend/app --severity-level high --confidence-level high
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: python-static-findings
@@ -67,7 +67,7 @@ jobs:
         if: always()
         working-directory: web
         run: npm audit --audit-level=low --json > ../npm-audit.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: dependency-audits
@@ -87,7 +87,7 @@ jobs:
           aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb
           fs --scanners vuln --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
           --exit-code 1 --format json --output /report/swift-audit.json /source
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: swift-dependency-audit
