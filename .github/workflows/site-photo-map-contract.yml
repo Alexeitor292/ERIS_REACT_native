@@ -16,6 +16,6 @@ jobs:
       run:
         working-directory: ios/ERISKit
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Native Swift camera and photo evidence tests
         run: swift test --filter 'PhotoCaptureTests|PhotoCorrectionsTests'
