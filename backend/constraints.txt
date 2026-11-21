@@ -35,7 +35,7 @@ packaging==26.3
 pillow==13.0.0
 pluggy==1.7.0
 pycparser==3.12
-pycryptodome==4.4.0
+pycryptodome==4.5.0
 pydantic==2.14.3
 pydantic-settings==2.16.3
 pydantic_core==2.50.4
